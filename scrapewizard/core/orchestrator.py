@@ -122,12 +122,17 @@ class Orchestrator:
                 input("Press ENTER after you have logged in and reached the target page...")
                 
                 cookies = await browser.get_cookies()
+                storage_state = await browser.get_storage_state()
                 final_url = browser.page.url
                 
                 with open(self.project_dir / "cookies.json", "w", encoding="utf-8") as f:
                     json.dump(cookies, f, indent=2)
                 
+                with open(self.project_dir / "storage_state.json", "w", encoding="utf-8") as f:
+                    json.dump(storage_state, f, indent=2)
+                
                 self.session["url"] = final_url
+                self.session["login_performed"] = True
                 
             finally:
                 await browser.close()
@@ -153,11 +158,20 @@ class Orchestrator:
             with open(cookie_file) as f:
                 cookies = json.load(f)
 
+        storage_state = None
+        storage_file = self.project_dir / "storage_state.json"
+        if storage_file.exists():
+            with open(storage_file) as f:
+                storage_state = json.load(f)
+
         async def do_recon():
-            browser = BrowserManager(headless=True)
+            # Use headed mode if login was performed, as requested by user
+            use_headless = not self.session.get("login_performed", False)
+            browser = BrowserManager(headless=use_headless, storage_state=storage_state)
             await browser.start()
             try:
-                if cookies:
+                # If no storage_state but we have legacy cookies, inject them
+                if not storage_state and cookies:
                     await browser.inject_cookies(cookies)
                     
                 await browser.navigate(self.session["url"])
@@ -224,6 +238,11 @@ class Orchestrator:
                     
                     with open(self.project_dir / "scan_profile.json", "w", encoding="utf-8") as f:
                         json.dump(scan_profile, f, indent=2)
+                        
+                    # Capture full storage state after solve
+                    storage_state = await browser.get_storage_state()
+                    with open(self.project_dir / "storage_state.json", "w", encoding="utf-8") as f:
+                        json.dump(storage_state, f, indent=2)
                         
                     html = await browser.get_content()
                     analyzer = DOMAnalyzer(html)
@@ -304,10 +323,15 @@ class Orchestrator:
             fields = UI.ask_fields(understanding.get("available_fields", []))
             pagination = UI.ask_pagination()
             fmt = UI.ask_format()
-            browser_mode = UI.confirm_browser_mode(
-                understanding.get("recommended_browser_mode", "headless"),
-                understanding.get("reason", "No reason provided")
-            )
+            recommended_mode = understanding.get("recommended_browser_mode", "headless")
+            reason = understanding.get("reason", "No reason provided")
+            
+            # If login was performed, Force Headed as per user request
+            if self.session.get("login_performed", False):
+                recommended_mode = "headed"
+                reason = "Login was performed earlier. Headed mode is REQUIRED to maintain the authenticated session and bypass anti-bot measures."
+
+            browser_mode = UI.confirm_browser_mode(recommended_mode, reason)
         
         config = {
             "fields": fields,

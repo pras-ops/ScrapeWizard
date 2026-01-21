@@ -17,9 +17,10 @@ The project follows a **Modular State Machine** architecture. Each step of the p
 4.  **INTERACTIVE_SOLVE**: If a CAPTCHA is detected, the system pauses for manual human bypass and captures session cookies.
 5.  **LLM_ANALYSIS**: AI looks at the DOM AND the Scan Profile to see if it's scrapable.
 6.  **USER_CONFIG**: User selects fields (Title, Price, etc.) and confirms the **Adaptive Browser Mode**.
-7.  **CODEGEN**: AI writes a standalone `generated_scraper.py` (with cookie-loading support).
-8.  **TEST & REPAIR**: The script is automatically run. If it crashes (e.g. module error), the AI performs **Bulletproof Import** fixes.
-9.  **FINAL_RUN**: The polished script runs and saves data (JSON, CSV, Excel).
+7.  **CODEGEN**: AI writes a standalone `generated_scraper.py` (with **Full Session Persistence** and **Absolute Path** support).
+8.  **TEST & REPAIR**: The script is automatically run. If it crashes, the AI performs **Bulletproof Import** fixes.
+9.  **HARDENING**: The script is injected with absolute path discovery (`os.path.abspath`) for portability.
+10. **FINAL_RUN**: The polished script runs and saves cleaned data (JSON, CSV, Excel).
 
 ---
 
@@ -78,11 +79,8 @@ Instead of just grabbing the HTML, we "observe" the page and its traffic.
 - **Network Analysis**: We intercept Fetch/XHR/GraphQL calls to find backend API endpoints.
 - **Adaptive Browser Mode**: If we detect CAPTCHAs, Cloudflare, or low DOM health, we switch to **Headed mode** ("Headed mode is earned, not default").
 
-### 2. Human-in-the-Loop (HITL) Solving
-When a site blocks an automated agent, ScrapeWizard doesn't just fail. It enters the `INTERACTIVE_SOLVE` state:
-- It opens a visible browser and pauses.
-- The user solves the CAPTCHA or bypasses the blocker.
-- **Session Persistence**: ScrapeWizard captures the resulting `cookies.json` and instructs the `CodeGenerator` to load them in the final scraper.
+- **Full Session Persistence (Storage State)**: ScrapeWizard captures the full `storage_state.json` (Cookies + LocalStorage + SessionStorage). This is critical for modern SPAs using JWTs or token-based auth hidden in the browser's storage.
+- **Portability via Absolute Paths**: Generated scripts use `os.path.dirname(os.path.abspath(__file__))` to find their session files and output folders, meaning they run flawlessly from any directory or CI environment.
 
 ### 3. DOM Analysis 2.0 (Scoring & Filtering)
 We don't just find all repeating classes. We score them based on "Richness" (how many child fields they have). This ensures we pick the main product list instead of the footer links.
@@ -91,13 +89,16 @@ We don't just find all repeating classes. We score them based on "Richness" (how
 Every LLM call is logged to `llm_logs/`. 
 - `codegen_response.py`: See what the AI originally wrote.
 - `repair_response_X.py`: See how the AI tried to fix the error.
-- **Bulletproof Imports**: We use a RegEx-based post-processor to automatically intercept and correct common import hallucinations (e.g., `async_playwright` module errors) before execution.
+- **Bulletproof Imports**: RegEx-based post-processor corrects common import hallucinations (e.g., `async_playwright` module errors).
+- **No-Null Filtering**: Prompts strictly enforce that generated scripts filter out empty or 'null' rows before saving.
 ---
 
 ## 🚀 4. How to Learn from This
 1.  **Read `orchestrator.py`**: This is the heart of the project. It connects all the pieces.
-2.  **Experiment with Prompts**: Change `prompts.py` to see if the AI writes better or faster code.
 3.  **Break it**: Try a very complex site (like Amazon) to see how the **RepairAgent** handles anti-bot measures or complex lazy loading.
+
+### 💡 Multi-Step Public Scrapes (Power User Tip)
+Even if a site has no login, you can choose the **"Yes (Login / Click-through)"** flow to manually navigate through complex menus or apply persistent filters. ScrapeWizard will capture the final state and any session storage changes, allowing the AI to analyze the *exact* view you reached.
 
 ---
 

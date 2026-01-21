@@ -30,11 +30,21 @@ class RepairAgent:
         understanding = self._load_json("llm_understanding.json")
         run_config = self._load_json("run_config.json")
         
-        # Check for cookies
+        # Check for session state
+        has_storage = (self.project_dir / "storage_state.json").exists()
         has_cookies = (self.project_dir / "cookies.json").exists()
+        
         cookies_context = ""
-        if has_cookies:
-            cookies_context = "- A 'cookies.json' file exists in the project directory. ENSURE the script loads these cookies into the browser context.\n"
+        if has_storage:
+            cookies_context = """- A 'storage_state.json' file exists. ENSURE the script loads THIS STORAGE STATE (cookies + local storage) into the browser context. 
+- IMPORTANT: Use absolute paths in the script so it can be run from any directory. 
+- Use: script_dir = os.path.dirname(os.path.abspath(__file__))
+- Use: storage_path = os.path.join(script_dir, 'storage_state.json')
+- Use: output_dir = os.path.join(script_dir, 'output')
+- Use: context = await browser.new_context(storage_state=storage_path)
+"""
+        elif has_cookies:
+            cookies_context = "- A 'cookies.json' file exists. ENSURE the script loads these cookies into the browser context. Use absolute paths based on the script directory.\n"
         
         user_prompt = f"""
 Current Script:
@@ -63,7 +73,9 @@ Ensure:
 2. Create output dir: os.makedirs('output', exist_ok=True)
 3. Use proper async/await syntax
 4. Use the correct CSS selectors from the analysis snapshot
-5. Valid Python that runs immediately
+5. Valid Python that runs immediately and is robust to directory changes (use os.path.abspath and base all paths on the script's directory).
+6. Fix any pagination logic to ensure it actually clicks 'Next' if multi-page is required.
+7. Filter out any 'null' or empty data records before appending to the results list.
 {cookies_context}
 """
         

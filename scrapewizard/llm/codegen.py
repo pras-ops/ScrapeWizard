@@ -20,11 +20,21 @@ class CodeGenerator:
         """
         log("Generating scraper code...")
         
-        # Check for cookies
+        # Check for session state
+        has_storage = (self.project_dir / "storage_state.json").exists()
         has_cookies = (self.project_dir / "cookies.json").exists()
+        
         cookies_context = ""
-        if has_cookies:
-            cookies_context = "- A 'cookies.json' file exists in the project directory. GENERATE CODE TO LOAD THESE COOKIES into the browser context BEFORE navigating to the target URL.\n"
+        if has_storage:
+            cookies_context = """- A 'storage_state.json' file exists. GENERATE CODE TO LOAD THIS STORAGE STATE (cookies + local storage) into the browser context. 
+- IMPORTANT: Use absolute paths in the script so it can be run from any directory. 
+- Use: script_dir = os.path.dirname(os.path.abspath(__file__))
+- Use: storage_path = os.path.join(script_dir, 'storage_state.json')
+- Use: output_dir = os.path.join(script_dir, 'output')
+- Use: context = await browser.new_context(storage_state=storage_path)
+"""
+        elif has_cookies:
+            cookies_context = "- A 'cookies.json' file exists. GENERATE CODE TO LOAD THESE COOKIES into the browser context BEFORE navigating to the target URL. Use absolute paths based on the script directory.\n"
         
         user_prompt = f"""
 Analysis Snapshot: {json.dumps(snapshot, indent=2)}
@@ -38,7 +48,9 @@ IMPORTANT: Output ONLY valid Python code. No explanations, no markdown, no comme
 The script must:
 1. Save results to 'output/data.json'
 2. Use asyncio and async_playwright
-3. Be immediately runnable
+3. Be immediately runnable and robust to directory changes (use os.path.abspath and base all paths on the script's directory).
+4. If multi-page pagination is requested, implement a robust loop that clicks the 'Next' button or equivalent.
+5. Filter out any 'null' or empty data records before appending to the results list.
 {cookies_context}
 """
         

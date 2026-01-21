@@ -9,9 +9,10 @@ class BrowserManager:
     """
     Manages Playwright browser session for reconnaissance and recording.
     """
-    def __init__(self, headless: bool = True, proxy: Optional[Dict] = None):
+    def __init__(self, headless: bool = True, proxy: Optional[Dict] = None, storage_state: Optional[Dict] = None):
         self.headless = headless
         self.proxy = proxy
+        self.storage_state = storage_state
         self.playwright = None
         self.browser = None
         self.context = None
@@ -31,10 +32,14 @@ class BrowserManager:
         self.browser = await self.playwright.chromium.launch(**launch_args)
         
         # Standard user agent to avoid basic blocking
-        self.context = await self.browser.new_context(
-             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-             viewport={"width": 1280, "height": 800}
-        )
+        context_args = {
+             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+             "viewport": {"width": 1280, "height": 800}
+        }
+        if self.storage_state:
+            context_args["storage_state"] = self.storage_state
+
+        self.context = await self.browser.new_context(**context_args)
         self.page = await self.context.new_page()
 
     async def close(self):
@@ -67,6 +72,10 @@ class BrowserManager:
     async def get_cookies(self) -> List[Dict]:
         """Get current cookies."""
         return await self.context.cookies()
+
+    async def get_storage_state(self) -> Dict[str, Any]:
+        """Get full storage state (cookies + local storage)."""
+        return await self.context.storage_state()
 
     async def inject_cookies(self, cookies: List[Dict]):
         """Inject cookies into context."""
