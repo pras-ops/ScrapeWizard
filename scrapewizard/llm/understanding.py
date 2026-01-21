@@ -13,7 +13,7 @@ class UnderstandingAgent:
         self.client = LLMClient()
         self.project_dir = project_dir
 
-    def analyze(self, snapshot_data: Dict, interaction_log: Dict = None) -> Dict:
+    def analyze(self, snapshot_data: Dict, scan_profile: Dict = None, interaction_log: Dict = None) -> Dict:
         """
         Send snapshot to LLM to understand structure.
         """
@@ -22,6 +22,9 @@ class UnderstandingAgent:
         user_prompt = f"""
         Here is the analysis of the webpage:
         {json.dumps(snapshot_data, indent=2)}
+        
+        Behavioral Scan Profile:
+        {json.dumps(scan_profile, indent=2) if scan_profile else "None"}
         
         Interaction Log:
         {json.dumps(interaction_log, indent=2) if interaction_log else "None"}

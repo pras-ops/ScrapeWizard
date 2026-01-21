@@ -1,5 +1,6 @@
 import re
 import json
+import time
 from pathlib import Path
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_REPAIR
@@ -29,6 +30,12 @@ class RepairAgent:
         understanding = self._load_json("llm_understanding.json")
         run_config = self._load_json("run_config.json")
         
+        # Check for cookies
+        has_cookies = (self.project_dir / "cookies.json").exists()
+        cookies_context = ""
+        if has_cookies:
+            cookies_context = "- A 'cookies.json' file exists in the project directory. ENSURE the script loads these cookies into the browser context.\n"
+        
         user_prompt = f"""
 Current Script:
 {current_code}
@@ -57,9 +64,13 @@ Ensure:
 3. Use proper async/await syntax
 4. Use the correct CSS selectors from the analysis snapshot
 5. Valid Python that runs immediately
+{cookies_context}
 """
         
         new_code = self.client.call(SYSTEM_PROMPT_REPAIR, user_prompt, json_mode=False)
+        
+        # Save raw response
+        self._save_log(f"repair_response_{int(time.time())}.py", new_code)
         
         # Robust extraction
         new_code = self._extract_python_code(new_code)
@@ -70,6 +81,12 @@ Ensure:
             
         log("Repaired script saved.")
         return True
+
+    def _save_log(self, filename: str, content: str):
+        log_dir = self.project_dir / "llm_logs"
+        log_dir.mkdir(exist_ok=True)
+        with open(log_dir / filename, "w", encoding="utf-8") as f:
+            f.write(content)
 
     def _load_json(self, filename: str):
         """Load a JSON file from project directory."""
@@ -100,10 +117,18 @@ Ensure:
                 code_start = i
                 break
         
+        code = '\n'.join(lines[code_start:])
         code = code.strip()
         
         # Post-extraction fixes for common LLM hallucinations
-        code = code.replace("from async_playwright import", "from playwright.async_api import")
-        code = code.replace("import async_playwright", "from playwright.async_api import async_playwright")
+        # 1. Broadly replace async_playwright package hits with the correct async path
+        code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
+        code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
         
+        # 2. Fix specific common mis-imports that the broad rule might leave weird
+        code = re.sub(r'from\s+playwright\.async_api\s+import\s+async_playwright\.async_api', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
+        
+        # 3. Ensure any stray 'async_playwright.async_api' (as a package) is corrected
+        code = re.sub(r'\basync_playwright\.async_api\b', 'playwright.async_api', code, flags=re.IGNORECASE)
+
         return code

@@ -38,7 +38,7 @@ class RepairLoop:
                 return True
             
             # Failed
-            log("Test failed.")
+            log(f"Test failed. Output: {output[:300]}...")
             if attempts == self.max_attempts:
                 log("Max repair attempts reached.", level="error")
                 return False

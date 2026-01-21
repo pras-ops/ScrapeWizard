@@ -10,6 +10,7 @@ from scrapewizard.core.config import ConfigManager
 
 from scrapewizard.interactive.ui import UI
 from scrapewizard.recon.browser import BrowserManager
+from scrapewizard.recon.scanner import Scanner
 from scrapewizard.recon.dom_analyzer import DOMAnalyzer
 from scrapewizard.recon.pagination import PaginationDetector
 from scrapewizard.recon.tech_fingerprint import TechFingerprinter
@@ -61,6 +62,8 @@ class Orchestrator:
                     self._handle_test()
                 elif current_state == State.REPAIR.value:
                     self._handle_repair()
+                elif current_state == State.INTERACTIVE_SOLVE.value:
+                    self._handle_interactive_solve()
                 elif current_state == State.APPROVED.value:
                     self._handle_final_run()
                 else:
@@ -158,6 +161,15 @@ class Orchestrator:
                     await browser.inject_cookies(cookies)
                     
                 await browser.navigate(self.session["url"])
+                
+                # 1. Run Behavioral Scan
+                scanner = Scanner(browser.page)
+                scan_profile = await scanner.scan(self.session["url"])
+                
+                # Save Scan Profile
+                with open(self.project_dir / "scan_profile.json", "w", encoding="utf-8") as f:
+                    json.dump(scan_profile, f, indent=2)
+                
                 html = await browser.get_content()
                 
                 await browser.take_screenshot(self.project_dir / "debug_recon.png")
@@ -184,7 +196,63 @@ class Orchestrator:
                 await browser.close()
         
         asyncio.run(do_recon())
-        self._transition_to(State.LLM_ANALYSIS)
+        
+        # Check for CAPTCHA
+        with open(self.project_dir / "scan_profile.json", "r") as f:
+            profile = json.load(f)
+            
+        if profile.get("tech_stack", {}).get("anti_bot", {}).get("captcha") and not self.ci_mode:
+            self._transition_to(State.INTERACTIVE_SOLVE)
+        else:
+            self._transition_to(State.LLM_ANALYSIS)
+
+    def _handle_interactive_solve(self):
+        """HITL: Let user solve CAPTCHA/Blocker manually."""
+        log("Entering INTERACTIVE_SOLVE state...")
+        
+        async def do_solve():
+            browser = BrowserManager(headless=False)
+            await browser.start()
+            try:
+                await browser.navigate(self.session["url"])
+                # Wait for user
+                if await UI.wait_for_solve(reason="CAPTCHA or blocking screen detected."):
+                    # Capture current state after solve
+                    log("User confirmed solve. Re-scanning page state...")
+                    scanner = Scanner(browser.page)
+                    scan_profile = await scanner.scan(browser.page.url)
+                    
+                    with open(self.project_dir / "scan_profile.json", "w", encoding="utf-8") as f:
+                        json.dump(scan_profile, f, indent=2)
+                        
+                    html = await browser.get_content()
+                    analyzer = DOMAnalyzer(html)
+                    analysis = analyzer.analyze()
+                    
+                    with open(self.project_dir / "analysis_snapshot.json", "w", encoding="utf-8") as f:
+                        json.dump(analysis, f, indent=2)
+                        
+                    # Capture interaction: user solved captcha
+                    interaction = {"captcha_solved_manually": True, "final_url": browser.page.url}
+                    with open(self.project_dir / "interaction.json", "w", encoding="utf-8") as f:
+                        json.dump(interaction, f, indent=2)
+                        
+                    # Also capture cookies to bypass future CAPTCHAs
+                    cookies = await browser.get_cookies()
+                    with open(self.project_dir / "cookies.json", "w", encoding="utf-8") as f:
+                        json.dump(cookies, f, indent=2)
+                        
+                    log("Cookies saved for generated script.")
+                else:
+                    log("User cancelled solve.", level="warning")
+                    self._transition_to(State.FAILED)
+                    return False
+                return True
+            finally:
+                await browser.close()
+                
+        if asyncio.run(do_solve()):
+            self._transition_to(State.LLM_ANALYSIS)
 
     def _handle_llm_analysis(self):
         """Call LLM for understanding."""
@@ -198,12 +266,20 @@ class Orchestrator:
              with open(self.project_dir / "interaction.json", "r") as f:
                 interaction = json.load(f)
         
-        understanding = agent.analyze(snapshot, interaction)
+        scan_profile = None
+        if (self.project_dir / "scan_profile.json").exists():
+            with open(self.project_dir / "scan_profile.json", "r") as f:
+                scan_profile = json.load(f)
         
-        if not understanding.get("scraping_possible", False):
-            if self.ci_mode:
-                log("CI Mode: LLM says scraping not possible, but overriding.", level="warning")
-            else:
+        understanding = agent.analyze(snapshot, scan_profile, interaction)
+        
+        if self.ci_mode:
+            if not understanding.get("scraping_possible") or understanding.get("confidence", 0) < 0.5:
+                log(f"CI Mode Aborted: {understanding.get('reason', 'Ambiguous UI detected')}", level="error")
+                self._transition_to(State.FAILED)
+                return
+        else:
+            if not understanding.get("scraping_possible", False):
                 if not UI.override_llm_hallucination(understanding.get("reason", "Unknown")):
                     self._transition_to(State.FAILED)
                     return
@@ -222,16 +298,22 @@ class Orchestrator:
                 fields = ["item_title", "item_price"] # Generic fallback
             pagination = "first_page"
             fmt = "json"
-            log(f"CI Mode: Using defaults - Fields: {fields}, Pagination: {pagination}, Format: {fmt}")
+            browser_mode = understanding.get("recommended_browser_mode", "headless")
+            log(f"CI Mode: Using defaults - Fields: {fields}, Pagination: {pagination}, Format: {fmt}, Browser Mode: {browser_mode}")
         else:
             fields = UI.ask_fields(understanding.get("available_fields", []))
             pagination = UI.ask_pagination()
             fmt = UI.ask_format()
+            browser_mode = UI.confirm_browser_mode(
+                understanding.get("recommended_browser_mode", "headless"),
+                understanding.get("reason", "No reason provided")
+            )
         
         config = {
             "fields": fields,
             "pagination": pagination,
-            "format": fmt
+            "format": fmt,
+            "browser_mode": browser_mode
         }
         
         with open(self.project_dir / "run_config.json", "w", encoding="utf-8") as f:
@@ -249,12 +331,17 @@ class Orchestrator:
             understanding = json.load(f)
         with open(self.project_dir / "run_config.json") as f: 
             run_config = json.load(f)
+        scan_profile = None
+        if (self.project_dir / "scan_profile.json").exists():
+             with open(self.project_dir / "scan_profile.json", "r") as f:
+                 scan_profile = json.load(f)
+
         interaction = None
         if (self.project_dir / "interaction.json").exists():
              with open(self.project_dir / "interaction.json") as f: 
                  interaction = json.load(f)
-             
-        agent.generate(snapshot, understanding, run_config, interaction)
+
+        agent.generate(snapshot, understanding, run_config, scan_profile, interaction)
         self._transition_to(State.TEST)
 
     def _handle_test(self):
@@ -263,7 +350,8 @@ class Orchestrator:
         
         success, output = ScriptTester.run_test(
             self.project_dir / "generated_scraper.py",
-            self.project_dir
+            self.project_dir,
+            timeout=120
         )
         
         if success:
@@ -334,7 +422,8 @@ class Orchestrator:
         def runner():
             return ScriptTester.run_test(
                 self.project_dir / "generated_scraper.py",
-                self.project_dir
+                self.project_dir,
+                timeout=120
             )
         
         # Run repair with column hints if available

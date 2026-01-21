@@ -25,6 +25,23 @@ class UI:
         ).execute()
 
     @staticmethod
+    def confirm_browser_mode(recommended: str, reason: str) -> str:
+        """Ask user to confirm browser mode (headless vs headed)."""
+        console.print(f"\n[bold cyan]🔍 Browser Mode Analysis[/bold cyan]")
+        color = "yellow" if recommended == "headed" else "green"
+        console.print(f"Recommended: [{color}]{recommended.upper()}[/{color}]")
+        console.print(f"[dim]Reason: {reason}[/dim]")
+        
+        return inquirer.select(
+            message="Confirm browser mode:",
+            choices=[
+                Choice("headless", "Headless (Invisible, Faster)"),
+                Choice("headed", "Headed (Visible, Better Compatibility)")
+            ],
+            default=recommended
+        ).execute()
+
+    @staticmethod
     def ask_save_credentials() -> bool:
         return inquirer.confirm(message="Save username/password for the generated script?").execute()
     
@@ -108,6 +125,18 @@ class UI:
                 Choice("all", "All formats")
             ]
         ).execute()
+
+    @staticmethod
+    async def wait_for_solve(reason: str = "A CAPTCHA or blocking screen was detected.") -> bool:
+        """Pause execution and let user solve a blocker in the headed browser."""
+        console.print(f"\n[bold red]🛑 ACTION REQUIRED: {reason}[/bold red]")
+        console.print("[yellow]Please solve the CAPTCHA or bypass the blocker in the browser window.[/yellow]")
+        console.print("[dim]- ScrapeWizard is waiting for you...[/dim]")
+        
+        return await inquirer.confirm(
+            message="Have you solved the blocker and reached the data?",
+            default=True
+        ).execute_async()
 
     @staticmethod
     def override_llm_hallucination(reason: str) -> bool:
