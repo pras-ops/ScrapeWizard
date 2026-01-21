@@ -1,0 +1,59 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Report Data",
+    "type": "object",
+    "properties": {
+        "meta": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                },
+                "generated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "config": {
+            "type": "object"
+        },
+        "stats": {
+            "type": "object",
+            "properties": {
+                "rows_extracted": {
+                    "type": "integer"
+                },
+                "duration_seconds": {
+                    "type": "number"
+                },
+                "error_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "files": {
+            "type": "object",
+            "properties": {
+                "json": {
+                    "type": "string"
+                },
+                "csv": {
+                    "type": "string"
+                },
+                "xlsx": {
+                    "type": "string"
+                }
+            }
+        },
+        "sample_data": {
+            "type": "array",
+            "items": {
+                "type": "object"
+            }
+        }
+    },
+    "required": [
+        "meta",
+        "stats"
+    ]
+}

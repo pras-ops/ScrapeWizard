@@ -1,0 +1,42 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Run Config",
+    "type": "object",
+    "properties": {
+        "fields": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "pagination": {
+            "type": "string",
+            "enum": [
+                "first_page",
+                "all_pages",
+                "limit_5"
+            ]
+        },
+        "format": {
+            "type": "string",
+            "enum": [
+                "json",
+                "csv",
+                "xlsx",
+                "all"
+            ]
+        },
+        "use_proxy": {
+            "type": "boolean"
+        },
+        "headless": {
+            "type": "boolean",
+            "default": true
+        }
+    },
+    "required": [
+        "fields",
+        "pagination",
+        "format"
+    ]
+}

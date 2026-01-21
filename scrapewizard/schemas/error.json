@@ -1,0 +1,31 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Error Report",
+    "type": "object",
+    "properties": {
+        "error_type": {
+            "type": "string"
+        },
+        "message": {
+            "type": "string"
+        },
+        "stack_trace": {
+            "type": "string"
+        },
+        "context": {
+            "type": "object"
+        },
+        "recoverable": {
+            "type": "boolean"
+        },
+        "timestamp": {
+            "type": "string",
+            "format": "date-time"
+        }
+    },
+    "required": [
+        "error_type",
+        "message",
+        "timestamp"
+    ]
+}

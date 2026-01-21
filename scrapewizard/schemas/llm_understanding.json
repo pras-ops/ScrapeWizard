@@ -1,0 +1,56 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "LLM Understanding",
+    "description": "Output of the LLM understanding phase",
+    "type": "object",
+    "properties": {
+        "scraping_possible": {
+            "type": "boolean"
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+        },
+        "reason": {
+            "type": "string"
+        },
+        "available_fields": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "selector_guess": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            }
+        },
+        "pagination": {
+            "type": "object",
+            "properties": {
+                "strategy": {
+                    "type": "string"
+                },
+                "next_button_selector": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "required": [
+        "scraping_possible",
+        "confidence",
+        "reason",
+        "available_fields"
+    ]
+}

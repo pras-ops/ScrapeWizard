@@ -1,0 +1,47 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Session State",
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string"
+        },
+        "created_at": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "url": {
+            "type": "string"
+        },
+        "state": {
+            "type": "string"
+        },
+        "project_dir": {
+            "type": "string"
+        },
+        "history": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "action": {
+                        "type": "string"
+                    },
+                    "details": {
+                        "type": "object"
+                    }
+                }
+            }
+        }
+    },
+    "required": [
+        "project_id",
+        "created_at",
+        "url",
+        "state",
+        "project_dir"
+    ]
+}

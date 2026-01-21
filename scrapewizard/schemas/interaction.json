@@ -1,0 +1,48 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Interaction Log",
+    "type": "object",
+    "properties": {
+        "login_required": {
+            "type": "boolean"
+        },
+        "steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "click",
+                            "input",
+                            "navigate",
+                            "wait"
+                        ]
+                    },
+                    "selector": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    },
+                    "timestamp": {
+                        "type": "number"
+                    }
+                },
+                "required": [
+                    "type"
+                ]
+            }
+        },
+        "final_url": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "login_required"
+    ]
+}

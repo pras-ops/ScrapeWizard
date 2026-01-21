@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Analysis Snapshot",
+  "description": "Output of the reconnaissance phase",
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "detected_tech": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["url", "title"]
+    },
+    "interaction_used": { "type": "boolean" },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["repeating_list", "table", "detail_block"] },
+          "selector": { "type": "string" },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "css": { "type": "string" },
+                "xpath": { "type": "string" },
+                "sample": { "type": "string" }
+              },
+              "required": ["name", "css"]
+            }
+          }
+        },
+        "required": ["type", "fields"]
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "properties": {
+        "detected": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["next_button", "url_param", "infinite_scroll", "none"] },
+        "selector": { "type": "string" },
+        "param": { "type": "string" }
+      },
+      "required": ["detected"]
+    }
+  },
+  "required": ["meta", "sections", "pagination"]
+}
