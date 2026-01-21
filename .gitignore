@@ -33,6 +33,7 @@ logs/
 llm_logs/
 *.log
 cookies.json
+.learn.md
 
 # IDE
 .vscode/
