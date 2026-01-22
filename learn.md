@@ -22,9 +22,10 @@ The project follows a **Modular State Machine** architecture. Each step of the p
 5.  **LLM_ANALYSIS**: AI looks at the DOM AND the Scan Profile to see if it's scrapable.
 6.  **USER_CONFIG**: User selects fields (Title, Price, etc.) and confirms the **Adaptive Browser Mode**.
 7.  **CODEGEN**: AI writes a standalone `generated_scraper.py` (with **Full Session Persistence** and **Absolute Path** support).
-8.  **TEST & REPAIR**: The script is automatically run. If it crashes, the AI performs **Bulletproof Import** fixes.
-9.  **HARDENING**: The script is injected with absolute path discovery (`os.path.abspath`) for portability.
-10. **FINAL_RUN**: The polished script runs and saves cleaned data (JSON, CSV, Excel).
+8.  **TEST & REPAIR**: The script runs. If it fails, the user is offered a **UX Firewall Choice**: Auto-Repair, Manual Edit, or Return to Config.
+9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Import** fixes and selector adjustments.
+10. **HARDENING**: The script is injected with absolute path discovery (`os.path.abspath`) for portability.
+11. **FINAL_RUN**: The polished script runs and saves cleaned data (JSON, CSV, Excel).
 
 ---
 
@@ -102,6 +103,8 @@ Every LLM call is logged to `llm_logs/`.
 - `codegen_response.py`: See what the AI originally wrote.
 - `repair_response_X.py`: See how the AI tried to fix the error.
 - **Bulletproof Imports**: RegEx-based post-processor corrects common import hallucinations (e.g., `async_playwright` module errors).
+- **Interactive Failure Recovery**: The `Orchestrator` uses a non-linear state machine. If a phase fails, it doesn't just crash; it allows the user to jump back to `USER_CONFIG` to change parameters (e.g., switching from Headless to Headed mode) before regenerating.
+- **Secure Credentials via Keyring**: API keys are never stored in plain text configuration files. They are handed off to the system's native secure storage (macOS Keychain, Windows Credential Manager) via the `keyring` library.
 - **No-Null Filtering**: Prompts strictly enforce that generated scripts filter out empty or 'null' rows before saving.
 ---
 

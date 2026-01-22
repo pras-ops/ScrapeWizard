@@ -1,10 +1,14 @@
 import asyncio
-import json
+import re
 import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from playwright.async_api import Page
+from urllib.parse import urlparse
+from playwright.async_api import Page, Error as PlaywrightError
 from scrapewizard.core.logging import log
+
+from scrapewizard.core.constants import DEFAULT_BROWSER_TIMEOUT
 
 class Scanner:
     """
@@ -25,9 +29,9 @@ class Scanner:
             "iframes": {},
             "errors": []
         }
-        self.start_time = 0
+        self.start_time = 0.0
 
-    async def scan(self, url: str, wizard_mode: bool = False) -> Dict[str, Any]:
+    async def scan(self, url: str, wizard_mode: bool = False, timeout: Optional[int] = None) -> Dict[str, Any]:
         """
         Execute the full behavioral scan pipeline.
         """
@@ -40,10 +44,18 @@ class Scanner:
         
         # 2. Initial Navigation (Baseline)
         try:
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            # Use provided timeout or default (multiplied by 1000 for ms)
+            timeout_ms = (timeout or DEFAULT_BROWSER_TIMEOUT) * 1000
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             self.scan_profile["performance"]["dom_ready_ms"] = (asyncio.get_event_loop().time() - self.start_time) * 1000
+        except asyncio.TimeoutError:
+            self._log_error("Initial navigation timed out", level="warning")
+            return self.scan_profile
+        except PlaywrightError as e:
+            self._log_error(f"Playwright navigation error: {e.message}", level="error")
+            return self.scan_profile
         except Exception as e:
-            self._log_error("navigation", e)
+            self._log_error(f"Unexpected navigation error: {e}", level="error")
             return self.scan_profile
             
         # 3. Pre-Render DOM Snapshot
@@ -53,6 +65,7 @@ class Scanner:
         if not wizard_mode:
             log("Waiting for JS render and hydration...")
         try:
+            # Use a slightly shorter timeout for networkidle check within the scan
             await self.page.wait_for_load_state("networkidle", timeout=10000)
         except:
             if not wizard_mode:
@@ -139,11 +152,7 @@ class Scanner:
         
         # DEBUG PRINTS - hide in wizard mode
         if not wizard_mode:
-            print(f"\n[DEBUG] Complexity: {complexity_score}, Hostility: {hostility_score}")
-            print(f"[DEBUG] Bot Cookies: {tech_data.get('bot_defense', {}).get('found_cookies')}")
-            print(f"[DEBUG] Bot Scripts: {tech_data.get('bot_defense', {}).get('found_scripts')}")
-            print(f"[DEBUG] Sign-In Detected: {signin_data.get('signin_detected', False)}")
-            print(f"[DEBUG] Sign-In Score: {signin_data.get('signin_likelihood_score', 0)}")
+            log(f"Complexity: {complexity_score}, Hostility: {hostility_score}")
         
         # 4. Override Logic
         if hostility_score >= 40:
@@ -167,12 +176,10 @@ class Scanner:
         
         if not wizard_mode:
             log(f"Complexity Score: {complexity_score}/100 ({'GUIDED' if access_rec == 'guided' else 'AUTOMATIC'} Mode Recommended)")
-        
-        if not wizard_mode:
             log("Behavioral scan complete.")
         return self.scan_profile
 
-    def _attach_network_listeners(self):
+    def _attach_network_listeners(self) -> None:
         """Set up request/response monitoring."""
         def handle_request(request):
             self.scan_profile["network_activity"]["request_count"] += 1
@@ -207,28 +214,34 @@ class Scanner:
                         "status": response.status,
                         "size": size
                     })
-            except Exception as e:
+            except Exception:
                 # Silently catch listener errors to avoid crashing the scan
                 pass
 
         self.page.on("request", handle_request)
         self.page.on("response", handle_response)
 
-    async def _safe_call(self, func, label: str, *args):
+    async def _safe_call(self, func, label: str, *args) -> Any:
         """Wrap scan steps with error handling."""
         try:
             return await func(*args)
+        except PlaywrightError as e:
+            self._log_error(f"Playwright error in {label}: {e.message}", level="error")
+            return None
         except Exception as e:
-            self._log_error(label, e)
+            self._log_error(f"Unexpected error in {label}: {e}", level="error")
             return None
 
-    def _log_error(self, step: str, error: Exception):
-        tb = traceback.format_exc()
-        log(f"Scan error in {step}: {error}\n{tb}", level="error")
+    def _log_error(self, message: str, level: str = "warning"):
+        """Centralized error logging for scanner with context."""
+        log(f"Scanner [{message}]", level=level)
+        if level == "error":
+             log(f"Scanner Traceback: {traceback.format_exc()}", level="debug")
         self.scan_profile["errors"].append({
-            "step": step,
-            "error": str(error),
-            "traceback": tb
+            "timestamp": datetime.now().isoformat(),
+            "message": message,
+            "level": level,
+            "traceback": traceback.format_exc() if level == "error" else None
         })
 
     async def _decide_browser_mode(self) -> str:
@@ -238,10 +251,10 @@ class Scanner:
         signals = {
             "captcha": self.scan_profile["tech_stack"]["anti_bot"].get("captcha", False),
             "cloudflare": self.scan_profile["tech_stack"]["anti_bot"].get("cloudflare", False),
-            "low_node_count": self.scan_profile["post_render_stats"].get("node_count", 0) < 100,
+            "low_node_count": self.scan_profile["post_render_stats"].get("node_count", 0) < 100 if self.scan_profile.get("post_render_stats") else True,
             "shadow_dom": self.scan_profile["tech_stack"].get("shadow_dom", False),
             "sse_websocket": self.scan_profile["realtime_connections"].get("has_sse", False) or \
-                             self.scan_profile["realtime_connections"].get("websocket_count", 0) > 0
+                             self.scan_profile["realtime_connections"].get("websocket_count", 0) > 0 if self.scan_profile.get("realtime_connections") else False
         }
         
         # Consolidation logic
@@ -258,7 +271,7 @@ class Scanner:
             
         return "headless"
 
-    def _calculate_complexity_score(self, behavioral: Dict, tech: Dict) -> Tuple[int, str, List[str]]:
+    def _calculate_complexity_score(self, behavioral: Dict[str, Any], tech: Dict[str, Any]) -> Tuple[int, str, List[str]]:
         """
         Calculate complexity score (0-100) and access recommendation.
         Score > 40 implies 'Guided Mode' is safer.
@@ -426,11 +439,9 @@ class Scanner:
     async def _detect_signin_requirement(self) -> Dict[str, Any]:
         """
         Detect if the page requires or suggests sign-in/authentication.
-        Sites like Amazon often require login for full functionality.
         """
         result = await self.page.evaluate("""
         () => {
-            // 1. Look for login/signin buttons and links
             const loginSelectors = [
                 'a[href*="login"]', 'a[href*="signin"]', 'a[href*="sign-in"]',
                 'a[href*="account"]', 'button[id*="login"]', 'button[id*="signin"]',
@@ -445,7 +456,6 @@ class Scanner:
                 catch (e) { }
             });
             
-            // 2. Check for auth-only content indicators
             const authIndicators = [
                 '[data-requires-auth]',
                 '.requires-login',
@@ -458,7 +468,6 @@ class Scanner:
                 catch (e) { }
             });
             
-            // 3. Check page text for auth prompts
             const bodyText = document.body.innerText.toLowerCase();
             const authKeywords = [
                 'sign in to continue',
@@ -470,8 +479,6 @@ class Scanner:
             ];
             
             const textMatches = authKeywords.filter(kw => bodyText.includes(kw)).length;
-            
-            // 4. Check for restricted content blur/overlay
             const blurredContent = document.querySelectorAll('[class*="blur"], [style*="blur"]').length;
             const overlays = document.querySelectorAll('[class*="overlay"], [class*="modal"][data-auth]').length;
             
@@ -509,7 +516,7 @@ class Scanner:
             signin_likelihood += 35
             reasons.append("Authentication overlays")
         
-        # Check URL patterns (Amazon, LinkedIn, etc.)
+        # Check URL patterns
         url = self.page.url.lower()
         if any(domain in url for domain in ["amazon", "linkedin", "facebook", "twitter", "instagram"]):
             signin_likelihood += 30
@@ -524,11 +531,10 @@ class Scanner:
 
     async def _detect_bot_defense_signals(self) -> Dict[str, Any]:
         """Deep scan for specific bot defense vendors."""
-        # 1. Cookies
         cookies = await self.page.context.cookies()
         cookie_names = [c["name"].lower() for c in cookies]
         bot_cookies = [
-            "_abck", "bm_sz", "ak_bmsc", # Akamai
+             "_abck", "bm_sz", "ak_bmsc", # Akamai
             "px3", "pxvid", # PerimeterX
             "cf_clearance", # Cloudflare
             "datadome", # DataDome
@@ -537,7 +543,6 @@ class Scanner:
         ]
         found_cookies = [c for c in bot_cookies if c in cookie_names]
         
-        # 2. JS Scripts
         script_srcs = await self.page.evaluate("""
         () => Array.from(document.scripts).map(s => s.src || "").filter(s => s)
         """)
@@ -549,7 +554,6 @@ class Scanner:
             if any(b in src.lower() for b in bad_scripts):
                 found_scripts.append(src[:50])
 
-        # 3. Honeypots
         honeypots = await self.page.evaluate("""
         () => {
             const inputs = Array.from(document.querySelectorAll("input"));
@@ -567,7 +571,7 @@ class Scanner:
             "honeypots": honeypots
         }
         
-    def _calculate_hostility_score(self, defense: Dict, network: Dict) -> Tuple[int, List[str]]:
+    def _calculate_hostility_score(self, defense: Dict[str, Any], network: Dict[str, Any]) -> Tuple[int, List[str]]:
         score = 0
         reasons = []
         
@@ -583,7 +587,6 @@ class Scanner:
             score += 20
             reasons.append(f"Honeypots detected ({defense['honeypots']})")
             
-        # Network Challenges
         bad_paths = ["/challenge", "/verify", "/fp", "/setup", "/perimeterx", "/akamai", "/datadome"]
         found_challenges = []
         for req in network.get("api_endpoints", []) + network.get("json_responses", []):

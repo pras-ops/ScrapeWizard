@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scrapewizard"
+version = "3.2.0"
+description = "An agentic AI web scraper builder using Playwright and LLMs."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "ScrapeWizard Team"}
+]
+dependencies = [
+    "typer>=0.9.0",
+    "playwright>=1.40.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "inquirerpy>=0.3.4",
+    "openai>=1.0.0",
+    "jinja2>=3.1.0",
+    "rich>=13.0.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.12.0",
+    "tenacity>=8.2.0",
+    "prompt_toolkit>=3.0.0",
+    "keyring>=24.0.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0"
+]
+
+[project.scripts]
+scrapewizard = "scrapewizard.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scrapewizard*"]

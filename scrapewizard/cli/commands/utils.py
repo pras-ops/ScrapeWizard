@@ -1,5 +1,6 @@
 import typer
 import sys
+from typing import Optional, Any, Dict, List
 import os
 import shutil
 import platform
@@ -15,7 +16,7 @@ from scrapewizard.core.logging import log, Logger
 
 console = Console(width=100) # Force width for better rendering in snapshots
 
-def list_projects():
+def list_projects() -> None:
     """List all local scraper projects."""
     projects = ProjectManager.list_projects()
     
@@ -48,7 +49,7 @@ def list_projects():
 
 def clean(
     force: bool = typer.Option(False, "--force", "-f", help="Force deletion without confirmation")
-):
+) -> None:
     """Clean up old projects."""
     projects = ProjectManager.list_projects()
     if not projects:
@@ -70,7 +71,7 @@ def clean(
     
     rprint("[green]Cleanup complete.[/green]")
 
-def doctor():
+def doctor() -> None:
     """Check environment health."""
     rprint("[bold cyan]Checking ScrapeWizard environment...[/bold cyan]")
     from scrapewizard.core.config import ConfigManager
@@ -99,7 +100,7 @@ def doctor():
     
     rprint("\n[bold green]System check complete.[/bold green]")
 
-def resume(project_id: str = typer.Argument(..., help="The ID of the project to resume")):
+def resume(project_id: str = typer.Argument(..., help="The ID of the project to resume")) -> None:
     """Resume an existing project."""
     projects_root = ProjectManager.PROJECTS_ROOT
     project_dir = projects_root / project_id

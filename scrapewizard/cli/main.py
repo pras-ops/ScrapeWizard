@@ -10,6 +10,7 @@ app = typer.Typer(
 
 # Register commands
 app.command()(setup.setup)
+app.command()(setup.auth)
 app.command()(scrape.scrape)
 app.command(name="list")(utils.list_projects)
 app.command()(utils.clean)

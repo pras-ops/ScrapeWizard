@@ -67,7 +67,9 @@ class RepairLoop:
             try:
                 self.agent.repair(script_path, output, context=context)
             except Exception as e:
+                import traceback
                 log(f"Repair agent failed: {e}", level="error")
+                log(f"Repair Traceback: {traceback.format_exc()}", level="debug")
                 return False
                 
             attempts += 1

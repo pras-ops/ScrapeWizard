@@ -38,6 +38,7 @@ class UI:
     @staticmethod
     def ask_save_credentials() -> bool:
         return inquirer.confirm(message="Save username/password for the generated script?").execute()
+
     @staticmethod
     def ask_access_mode(recommendation: str = "automatic", reason: str = "") -> str:
         """
@@ -85,7 +86,36 @@ class UI:
         return {"username": username, "password": password}
 
     @staticmethod
-    def ask_fields(available_fields: List[Dict]) -> List[str]:
+    def ask_fields_wizard(available_fields: List[Dict[str, Any]], suggested_fields: List[Dict[str, Any]]) -> List[str]:
+        """Wizard mode: Simple Y/n for suggested fields, or Edit."""
+        suggested_names = [f["name"] for f in suggested_fields]
+        
+        if not suggested_fields:
+            console.print("\n[yellow]⚠️  I couldn't find a clear repeating data pattern automatically.[/yellow]")
+            return UI.ask_fields(available_fields)
+
+        console.print(f"\n[bold green]Recommended Fields:[/bold green] {', '.join(suggested_names)}")
+        
+        choice = inquirer.select(
+            message="Use these suggested fields?",
+            choices=[
+                Choice(value="yes", name="✅ Yes, these look correct"),
+                Choice(value="no", name="❌ No, let me pick manually"),
+                Choice(value="retry", name="🔍 Look again (Deep Scan)")
+            ],
+            default="yes"
+        ).execute()
+        
+        if choice == "yes":
+            return suggested_names
+        elif choice == "retry":
+            return "retry" # Signal to orchestrator
+        
+        # If no, fall back to manual selection
+        return UI.ask_fields(available_fields)
+
+    @staticmethod
+    def ask_fields(available_fields: List[Dict[str, Any]]) -> List[str]:
         """
         Step 6.1: Select fields to scrape.
         Uses checkbox for MULTI-SELECT. All fields are pre-selected by default.
@@ -134,7 +164,6 @@ class UI:
         console.print(f"[green]Selected {len(selected)} field(s)[/green]")
         return selected
 
-
     @staticmethod
     def ask_pagination() -> str:
         """Step 6.3: Pagination."""
@@ -179,7 +208,7 @@ class UI:
         return inquirer.confirm(message="Continue anyway?", default=False).execute()
 
     @staticmethod
-    def show_data_preview(data: List[Dict], max_rows: int = 5) -> None:
+    def show_data_preview(data: List[Dict[str, Any]], max_rows: int = 5) -> None:
         """
         Display a rich table preview of scraped data.
         """
@@ -188,7 +217,7 @@ class UI:
             return
             
         # Build table
-        table = Table(title="📊 Data Preview (First {} rows)".format(min(len(data), max_rows)))
+        table = Table(title=f"📊 Data Preview (First {min(len(data), max_rows)} rows)")
         
         # Get columns from first row
         columns = list(data[0].keys())
@@ -203,7 +232,7 @@ class UI:
                 # Truncate long values
                 val_str = str(val) if val else "[dim]null[/dim]"
                 if len(val_str) > 40:
-                    val_str = val_str[:37] + "..."
+                    val_str = f"{val_str[:37]}..."
                 values.append(val_str)
             table.add_row(*values)
         
@@ -211,13 +240,9 @@ class UI:
         console.print(f"\n[dim]Total rows: {len(data)}[/dim]")
 
     @staticmethod
-    def review_data_quality(data: List[Dict]) -> Tuple[str, Optional[List[str]]]:
+    def review_data_quality(data: List[Dict[str, Any]]) -> Tuple[str, Optional[List[str]]]:
         """
-        Let user review data and choose action:
-        - approve: proceed with full run
-        - fix_columns: specify columns that need fixing
-        - abort: cancel everything
-        
+        Let user review data and choose action.
         Returns: (action, list of problematic columns or None)
         """
         if not data:
@@ -261,5 +286,37 @@ class UI:
 
     @staticmethod
     def approve_run() -> bool:
-        """Simple approve prompt (legacy, use review_data_quality for richer flow)."""
+        """Simple approve prompt."""
         return inquirer.confirm(message="Proceed with full scraping?").execute()
+
+    @staticmethod
+    def ask_test_failure_action(error_msg: str) -> str:
+        """Handle the case where a test run fails."""
+        console.print(f"\n[bold red]❌ Test Execution Failed[/bold red]")
+        console.print(f"[dim]Error: {error_msg[:200]}...[/dim]\n")
+        
+        return inquirer.select(
+            message="What would you like to do?",
+            choices=[
+                Choice("repair", "🩺 Attempt Auto-Repair (AI-driven)"),
+                Choice("config", "📋 Back to Configuration (Change fields/mode)"),
+                Choice("edit", "📝 Manual Fix (Open code in editor)"),
+                Choice("abort", "❌ Abort and exit")
+            ],
+            default="repair"
+        ).execute()
+
+    @staticmethod
+    def ask_repair_failure_action() -> str:
+        """Handle the case where auto-repair fails."""
+        console.print(f"\n[bold yellow]⚠️  Auto-Repair was unable to fix the issue.[/bold yellow]")
+        
+        return inquirer.select(
+            message="How would you like to proceed?",
+            choices=[
+                Choice("config", "📋 Back to Configuration"),
+                Choice("edit", "📝 Manual Fix"),
+                Choice("abort", "❌ Abort and exit")
+            ],
+            default="config"
+        ).execute()

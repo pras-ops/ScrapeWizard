@@ -38,54 +38,61 @@ class DOMAnalyzer:
             len(children) >= 2 and
             len(set(child.name for child in children)) >= 2
         )
+        if len(children) >= 2:
+            return True
+            
+        # Recursive check: if it has a single child that is rich
+        if len(children) == 1:
+            return self._is_rich_container(children[0])
+            
+        return False
 
     def _detect_repeating_sections(self) -> List[Dict]:
         """
         Identify repeating blocks (e.g., product cards) by analyzing class distribution.
         Prioritizes deeper/richer nodes to avoid utility links in footers/sidebars.
         """
-        # Collect all tags with classes
-        tag_classes = []
+        # Collect all tags with filtered "safe" classes
+        tag_groups = []
         for tag in self.soup.find_all(True):
-            # Skip hidden or utility tags
             if tag.name in ["script", "style", "noscript", "svg", "link", "meta", "nav", "footer", "header"]:
                 continue
             
-            if tag.get("class"):
-                # Tuple of sorted classes makes it hashable
-                classes = tuple(sorted(tag.get("class")))
-                tag_classes.append((tag.name, classes))
+            raw_classes = tag.get("class", [])
+            # Filter classes BEFORE grouping so that elements with (SharedClass + UniqueID) group together
+            safe_classes = tuple(sorted([c for c in raw_classes if self._is_safe_class(c)]))
+            
+            if safe_classes:
+                tag_groups.append((tag.name, safe_classes))
         
-        # Count occurrences
-        counts = Counter(tag_classes)
+        # Count occurrences of (Tag + SafeClasses)
+        counts = Counter(tag_groups)
         
-        # Filter for significant repetition (e.g. > 3 times)
         sections = []
         # Look at more candidates to find the richest one
-        for (tag_name, classes), count in counts.most_common(20):
+        for (tag_name, classes), count in counts.most_common(30):
             if count > 2:
-                # Filter classes to only keep safe ones
-                safe_classes = [c for c in classes if self._is_safe_class(c)]
-                
-                # Generate a selector for this group
-                if safe_classes:
-                    class_selector = "." + ".".join(safe_classes)
-                    full_selector = f"{tag_name}{class_selector}"
-                else:
-                    full_selector = tag_name
+                class_selector = "." + ".".join(classes)
+                full_selector = f"{tag_name}{class_selector}"
                 
                 # Check what fields are inside one instance
                 example_el = self.soup.select_one(full_selector)
-                if not example_el: continue
-                
-                # Minimum richness check
-                if not self._is_rich_container(example_el):
+                if not example_el:
                     continue
+                
+                # Minimum richness check (loosened)
+                if not self._is_rich_container(example_el):
+                    # Even if not "rich", if it has a high count and some text, it might be a simple list
+                    text_content = example_el.get_text(strip=True)
+                    if len(text_content) < 5:
+                        continue
+                
                 fields = self._extract_potential_fields(example_el)
                 
                 if fields:
-                    # Heuristic: richer nodes (more fields) are better candidates for main content
-                    score = len(fields) * count
+                    # Heuristic: richer nodes (more fields) are better candidates
+                    # Multiply by log(count) or similar to balance field density vs frequency
+                    score = len(fields) * (count ** 0.5)
                     sections.append({
                         "type": "repeating_list",
                         "selector": full_selector,
@@ -96,50 +103,69 @@ class DOMAnalyzer:
 
         # Sort by score descending and return
         sections.sort(key=lambda x: x["score"], reverse=True)
-        return sections[:10]
+        return sections[:12]
 
     def _extract_potential_fields(self, element) -> List[Dict]:
         """
         Look for text/links/images inside a container element.
         """
         fields = []
+        seen_selectors = set()
         
-        # Text fields (titles, prices)
+        # Text fields (titles, prices, ratings)
         for child in element.find_all(text=True, recursive=True):
             text = child.strip()
-            if len(text) > 1 and len(text) < 100:
+            # Allow slightly longer text for descriptions
+            if 1 < len(text) < 250:
                 parent = child.parent
                 tag = parent.name
                 
-                # Try to get a class for valid selector
-                css = tag
+                if tag in ["script", "style", "noscript"]:
+                    continue
+                
+                # Try to get a valid selector
                 raw_classes = parent.get("class", [])
                 safe_classes = [c for c in raw_classes if self._is_safe_class(c)]
-                if safe_classes:
-                    css += "." + ".".join(safe_classes)
                 
-                fields.append({
-                    "name": "text_field", # Generic name, specific naming left to LLM
-                    "css": css,
-                    "sample": text[:30]
-                })
+                if safe_classes:
+                    css = f"{tag}." + ".".join(safe_classes)
+                else:
+                    css = tag
+                
+                if css not in seen_selectors:
+                    fields.append({
+                        "name": "text_field",
+                        "css": css,
+                        "sample": text[:50]
+                    })
+                    seen_selectors.add(css)
 
-        # Links
-        links = element.find_all("a", href=True)
-        if links:
-            fields.append({
-                "name": "link",
-                "css": "a",
-                "sample": links[0]['href']
-            })
+        # Links (Prioritize those with high-level classes)
+        for link in element.find_all("a", href=True):
+            raw_classes = link.get("class", [])
+            safe_classes = [c for c in raw_classes if self._is_safe_class(c)]
+            css = "a" + ("." + ".".join(safe_classes) if safe_classes else "")
+            
+            if css not in seen_selectors:
+                fields.append({
+                    "name": "link",
+                    "css": css,
+                    "sample": link['href'][:50]
+                })
+                seen_selectors.add(css)
 
         # Images
-        imgs = element.find_all("img", src=True)
-        if imgs:
-            fields.append({
-                "name": "image",
-                "css": "img",
-                "sample": imgs[0]['src']
-            })
+        for img in element.find_all("img", src=True):
+            raw_classes = img.get("class", [])
+            safe_classes = [c for c in raw_classes if self._is_safe_class(c)]
+            css = "img" + ("." + ".".join(safe_classes) if safe_classes else "")
+            
+            if css not in seen_selectors:
+                fields.append({
+                    "name": "image",
+                    "css": css,
+                    "sample": img['src'][:50]
+                })
+                seen_selectors.add(css)
             
         return fields

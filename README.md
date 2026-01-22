@@ -16,9 +16,9 @@ ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropi
 - **Session Persistence (Storage State)**: Captures cookies, LocalStorage, and SessionStorage to bypass complex auth (JWT/Tokens) autonomously in future runs
 - **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust code
 - **Offline First & Portable**: Generated scrapers use absolute path discovery, ensuring they run from any directory without AI dependency
-- **Self-Healing**: Automatically repairs broken selectors post-generation
-- **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration
-- **Expert Mode**: Full technical output via `--expert` flag for power users and debugging
+- [/] **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration
+- [/] **Interactive Recovery**: Never get stuck. If a script fails, ScrapeWizard offers Auto-Repair, Manual Editing, or a return to configuration settings.
+- [/] **Expert Mode**: Full technical output via `--expert` flag for power users and debugging
 
 ## Installation
 
@@ -29,8 +29,14 @@ playwright install chromium
 
 ## Commands & Examples
 
-### 1. `setup` - Configuration
-Initial setup to configure your LLM provider and API keys.
+### 1. `auth` - Secure API Key Storage
+Store your AI providers' API key safely in your system's keyring. No plain text storage.
+```bash
+python -m scrapewizard.cli.main auth sk-or-v1-xyz...
+```
+
+### 2. `setup` - Configuration
+Initial setup to configure your LLM provider and default model.
 ```bash
 python -m scrapewizard.cli.main setup
 ```

@@ -1,28 +1,40 @@
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_UNDERSTANDING
 from scrapewizard.core.logging import log
+from scrapewizard.utils.file_io import safe_write_json
 
 class UnderstandingAgent:
-    """
-    Handles the 'Understanding & Feasibility' phase using LLM.
+    """Handles the 'Understanding & Feasibility' phase using LLM analysis.
+    
+    This agent takes a DOM snapshot and behavioral signals to identify the
+    underlying data structure and suggest relevant fields for scraping.
     """
     def __init__(self, project_dir: Path, wizard_mode: bool = False):
         self.client = LLMClient()
         self.project_dir = project_dir
         self.wizard_mode = wizard_mode
 
-    def analyze(self, snapshot_data: Dict, scan_profile: Dict = None, interaction_log: Dict = None) -> Dict:
-        """
-        Send snapshot to LLM to understand structure.
+    def analyze(self, snapshot_data: Dict[str, Any], scan_profile: Dict[str, Any] = None, interaction_log: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Analyzes the page structure using the LLM.
+        
+        Args:
+            snapshot_data: The DOM snapshot extracted during reconnaissance.
+            scan_profile: The behavioral signals (mutations, network, etc.).
+            interaction_log: Records of user interactions (login, navigation).
+            
+        Returns:
+            A dictionary containing the LLM's understanding of the data structure.
         """
         if not self.wizard_mode:
             log("Sending analysis snapshot to LLM...")
         
         user_prompt = f"""
-        Here is the analysis of the webpage:
+        Detect the core data structure. For each field found in 'available_fields', 
+        add a 'suggested' boolean (true if it's a primary data point like title/price).
+        
         {json.dumps(snapshot_data, indent=2)}
         
         Behavioral Scan Profile:
@@ -40,8 +52,7 @@ class UnderstandingAgent:
         parsed = self.client.parse_json(response_text)
         
         # Save understanding artifact
-        with open(self.project_dir / "llm_understanding.json", "w", encoding="utf-8") as f:
-            json.dump(parsed, f, indent=2)
+        safe_write_json(self.project_dir / "llm_understanding.json", parsed)
             
         return parsed
 

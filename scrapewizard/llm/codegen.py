@@ -1,23 +1,35 @@
 import json
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_CODEGEN
 from scrapewizard.core.logging import log
+from scrapewizard.utils.file_io import safe_write_json
 
 class CodeGenerator:
-    """
-    Handles LLM Code Generation phase.
+    """Handles the LLM Code Generation phase.
+    
+    This agent takes the analyzed data structure and generates a fully
+    functional Playwright script tailored to the target site's layout.
     """
     def __init__(self, project_dir: Path, wizard_mode: bool = False):
         self.client = LLMClient()
         self.project_dir = project_dir
         self.wizard_mode = wizard_mode
 
-    def generate(self, snapshot: Dict, understanding: Dict, run_config: Dict, scan_profile: Dict = None, interaction: Dict = None):
-        """
-        Generate the scraper based on inputs.
+    def generate(self, snapshot: Dict[str, Any], understanding: Dict[str, Any], run_config: Dict[str, Any], scan_profile: Dict[str, Any] = None, interaction: Dict[str, Any] = None) -> Path:
+        """Generates the scraper based on analysis and configuration.
+        
+        Args:
+            snapshot: The DOM snapshot metadata.
+            understanding: The LLM's understanding of the site structure.
+            run_config: User-provided configuration for the run.
+            scan_profile: Behavioral signals and hostility assessment.
+            interaction: Records of user interactions (login, etc.).
+            
+        Returns:
+            The Path to the generated Python script.
         """
         if not self.wizard_mode:
             log("Generating scraper code...")
@@ -64,7 +76,11 @@ The script must:
 2. Use asyncio and async_playwright
 3. Be immediately runnable and robust to directory changes (use os.path.abspath and base all paths on the script's directory).
 4. If multi-page pagination is requested, implement a robust loop that clicks the 'Next' button or equivalent.
-5. Filter out any 'null' or empty data records before appending to the results list.
+5. DATA QUALITY (CRITICAL):
+    - Filter out any 'null', empty, or malformed data records.
+    - DEDUPLICATE records based on the primary fields (title/url).
+    - If infinite scroll is used, set a hard limit of 50 interactions or check if node count stops growing.
+6. Respect the 'browser_mode' from run_config. If 'headed', set headless=False.
 {cookies_context}
 """
         
@@ -74,7 +90,7 @@ The script must:
         self._save_log("codegen_response.py", code)
         
         # Robust extraction: find Python code block
-        code = self._extract_python_code(code)
+        code = self.client.extract_python_code(code)
         
         output_path = self.project_dir / "generated_scraper.py"
         with open(output_path, "w", encoding="utf-8") as f:
@@ -84,49 +100,8 @@ The script must:
             log(f"Scraper generated at {output_path}")
         return output_path
 
-    def _save_log(self, filename: str, content: str):
+    def _save_log(self, filename: str, content: str) -> None:
         log_dir = self.project_dir / "llm_logs"
         log_dir.mkdir(exist_ok=True)
         with open(log_dir / filename, "w", encoding="utf-8") as f:
             f.write(content)
-
-    def _extract_python_code(self, text: str) -> str:
-        """
-        Extract Python code from LLM response, handling markdown fences 
-        and preamble text robustly.
-        """
-        # Try to find code in markdown fence
-        pattern = r"```(?:python)?\s*([\s\S]*?)```"
-        matches = re.findall(pattern, text)
-        if matches:
-            # Return the longest match (likely the full script)
-            code = max(matches, key=len)
-            return code.strip()
-        
-        # If no fence, try to find where code actually starts
-        # Look for common Python starts
-        lines = text.split('\n')
-        code_start = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(('import ', 'from ', 'class ', 'def ', 'async def ', '#!')):
-                code_start = i
-                break
-        
-        code = '\n'.join(lines[code_start:])
-        code = code.strip()
-        
-        # Post-extraction fixes for common LLM hallucinations
-        # 1. Broadly replace async_playwright package hits with the correct async path
-        code = re.sub(r'\bfrom\s+async_playwright\.async_api\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
-        
-        # 2. Fix specific common mis-imports that the broad rule might leave weird
-        code = re.sub(r'from\s+playwright\.async_api\s+import\s+async_playwright\.async_api', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
-        
-        # 3. Ensure any stray 'async_playwright.async_api' (as a package) is corrected
-        code = re.sub(r'\basync_playwright\.async_api\b', 'playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\basync_playwright\b', 'playwright.async_api', code, flags=re.IGNORECASE)
-
-        return code

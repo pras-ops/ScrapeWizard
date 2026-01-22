@@ -1,8 +1,10 @@
 import logging
 import sys
+import json
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import Optional, Any, Dict
+from pythonjsonlogger import jsonlogger
 
 class Logger:
     """Unified logging system/manager for ScrapeWizard."""
@@ -22,7 +24,7 @@ class Logger:
 
     @classmethod
     def setup_logging(cls, log_dir: Optional[Path] = None, verbose: bool = False):
-        """Configure logging with console and file handlers."""
+        """Configure logging with console, file, and JSON handlers."""
         logger = cls.get_logger()
         logger.handlers.clear()
 
@@ -37,7 +39,7 @@ class Logger:
             log_dir = Path(log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             
-            # Master Log
+            # Master Log (Human Readable)
             master_log_path = log_dir / "master.log"
             file_handler = RotatingFileHandler(
                 master_log_path, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
@@ -48,6 +50,20 @@ class Logger:
             )
             file_handler.setFormatter(file_formatter)
             logger.addHandler(file_handler)
+            
+            # Structured JSON Log (Machine Readable)
+            json_log_path = log_dir / "events.json"
+            json_handler = RotatingFileHandler(
+                json_log_path, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
+            )
+            json_handler.setLevel(logging.DEBUG)
+            
+            # Custom formatter to include all extra fields
+            json_formatter = jsonlogger.JsonFormatter(
+                '%(asctime)s %(name)s %(levelname)s %(message)s'
+            )
+            json_handler.setFormatter(json_formatter)
+            logger.addHandler(json_handler)
 
     @classmethod
     def add_step_log(cls, log_dir: Path, step_name: str):
@@ -71,14 +87,9 @@ class Logger:
         logger.removeHandler(handler)
         handler.close()
 
-def log(msg: str, level: str = "info"):
-    """Convenience function for logging."""
+def log(msg: str, level: str = "info", **extra: Any):
+    """Convenience function for logging with optional structured data."""
     l = Logger.get_logger()
-    if level.lower() == "debug":
-        l.debug(msg)
-    elif level.lower() == "warning":
-        l.warning(msg)
-    elif level.lower() == "error":
-        l.error(msg)
-    else:
-        l.info(msg)
+    log_func = getattr(l, level.lower(), l.info)
+    # Extra fields will be captured by the JsonFormatter
+    log_func(msg, extra=extra)

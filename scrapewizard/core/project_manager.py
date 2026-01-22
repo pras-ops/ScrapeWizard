@@ -1,24 +1,36 @@
 import os
-import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, List
 from scrapewizard.core.state import State
 from scrapewizard.core.logging import log
+from scrapewizard.utils.file_io import safe_read_json, safe_write_json
 
 class ProjectManager:
-    """Manages project directory creation, loading, and state persistence."""
+    """Manages project directory creation, loading, and state persistence.
+    
+    This class handles the lifecycle of a scraping project, including creating
+    directories, saving session state, and listing previous projects.
+    """
 
     PROJECTS_ROOT = Path.home() / "scrapewizard_projects"
 
     @classmethod
-    def ensure_root(cls):
+    def ensure_root(cls) -> None:
+        """Ensures the root projects directory exists."""
         cls.PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def create_project(cls, url: str) -> Dict:
-        """Create a new project directory and initialize session."""
+    def create_project(cls, url: str) -> Dict[str, Any]:
+        """Creates a new project directory and initializes the session.
+        
+        Args:
+            url: The target URL to be scraped.
+            
+        Returns:
+            A dictionary containing the initial session data.
+        """
         cls.ensure_root()
         
         # Extract domain for friendlier name
@@ -35,9 +47,9 @@ class ProjectManager:
         project_dir.mkdir(parents=True, exist_ok=True)
         
         # Create subdirectories
-        (project_dir / "logs").mkdir()
-        (project_dir / "llm_logs").mkdir()
-        (project_dir / "output").mkdir()
+        (project_dir / "logs").mkdir(exist_ok=True)
+        (project_dir / "llm_logs").mkdir(exist_ok=True)
+        (project_dir / "output").mkdir(exist_ok=True)
 
         # Initialize Session
         session_data = {
@@ -54,30 +66,38 @@ class ProjectManager:
         return session_data
 
     @classmethod
-    def load_project(cls, project_dir_path: str) -> Optional[Dict]:
-        """Load session state from a project directory."""
+    def load_project(cls, project_dir_path: str) -> Optional[Dict[str, Any]]:
+        """Loads session state from a project directory.
+        
+        Args:
+            project_dir_path: Path to the project directory.
+            
+        Returns:
+            The session data dictionary if successful, None otherwise.
+        """
         path = Path(project_dir_path) / "session.json"
-        if not path.exists():
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            log(f"Failed to load project: {e}", level="error")
-            return None
+        return safe_read_json(path, default=None)
 
     @classmethod
-    def save_state(cls, project_dir: Path, session_data: Dict):
-        """Save session state to disk."""
+    def save_state(cls, project_dir: Path, session_data: Dict[str, Any]) -> None:
+        """Saves session state to disk.
+        
+        Args:
+            project_dir: Path to the project directory.
+            session_data: The session data to save.
+        """
         if isinstance(project_dir, str):
             project_dir = Path(project_dir)
             
-        with open(project_dir / "session.json", "w", encoding="utf-8") as f:
-            json.dump(session_data, f, indent=2)
+        safe_write_json(project_dir / "session.json", session_data)
 
     @classmethod
-    def list_projects(cls):
-        """List all available projects sorted by creation time."""
+    def list_projects(cls) -> List[Path]:
+        """Lists all available projects sorted by creation time.
+        
+        Returns:
+            A list of Paths to project directories.
+        """
         if not cls.PROJECTS_ROOT.exists():
             return []
             

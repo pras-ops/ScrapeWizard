@@ -1,15 +1,16 @@
 import typer
 import json
+from typing import Dict, Any, List, Optional, Tuple
 from InquirerPy import inquirer
 from scrapewizard.core.config import ConfigManager
 from scrapewizard.core.logging import log
 
 def setup(
-    provider: str = typer.Option(None, help="LLM Provider (openai, anthropic, etc.)"),
-    api_key: str = typer.Option(None, help="API Key for the provider"),
-    model: str = typer.Option(None, help="Model name (e.g. gpt-4-turbo)"),
+    provider: Optional[str] = typer.Option(None, help="LLM Provider (openai, anthropic, openrouter, local)"),
+    api_key: Optional[str] = typer.Option(None, help="API Key for the provider"),
+    model: Optional[str] = typer.Option(None, help="Model name (e.g. gpt-4-turbo)"),
     use_proxy: bool = typer.Option(False, help="Enable proxy configuration")
-):
+) -> None:
     """
     Configure ScrapeWizard global settings.
     """
@@ -26,16 +27,20 @@ def setup(
         ).execute()
 
     if not api_key:
+        # Check if we already have one
+        existing_key = current_config.get("api_key", "")
+        key_masked = f"{existing_key[:4]}...{existing_key[-4:]}" if len(existing_key) > 8 else "********" if existing_key else ""
+        
         api_key = inquirer.text(
-            message="Enter API Key:",
-            default=current_config.get("api_key", ""),
+            message=f"Enter API Key (Current: {key_masked}):",
+            default=existing_key,
             validate=lambda result: len(result) > 0 or "API Key cannot be empty"
         ).execute()
 
     if not model:
         default_models = {
             "openai": "gpt-4-turbo",
-            "anthropic": "claude-3-opus-20240229",
+            "anthropic": "claude-3-5-sonnet-20240620",
             "openrouter": "google/gemini-pro",
             "local": "llama3"
         }
@@ -59,3 +64,18 @@ def setup(
         if proxy_url:
             ConfigManager.save_proxy({"url": proxy_url})
             log("Proxy settings saved.")
+
+def auth(
+    api_key: str = typer.Argument(..., help="The LLM API key to store securely")
+) -> None:
+    """
+    Securely store your LLM API key in the system keyring.
+    """
+    try:
+        config = ConfigManager.load_config()
+        config["api_key"] = api_key
+        ConfigManager.save_config(config)
+        log("API Key stored securely in keyring.")
+    except Exception as e:
+        log(f"Failed to save API key: {e}", level="error")
+        raise typer.Exit(code=1)

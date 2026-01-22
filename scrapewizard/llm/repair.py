@@ -2,23 +2,32 @@ import re
 import json
 import time
 from pathlib import Path
+from typing import Dict, Any, Optional
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_REPAIR
 from scrapewizard.core.logging import log
+from scrapewizard.utils.file_io import safe_read_json, safe_write_json
 
 class RepairAgent:
-    """
-    Handles self-healing repair attempts using LLM.
-    Includes full project context for better repairs.
+    """Handles self-healing repair attempts using LLM analysis.
+    
+    This agent uses full project context, including previous failures and
+    site metadata, to diagnose and fix failing scraper scripts.
     """
     def __init__(self, project_dir: Path):
         self.client = LLMClient()
         self.project_dir = Path(project_dir)
 
     def repair(self, script_path: Path, error_info: str, context: str = "") -> bool:
-        """
-        Attempt to repair a failing script.
-        Includes analysis_snapshot and llm_understanding for richer context.
+        """Attempts to repair a failing script using LLM intelligence.
+        
+        Args:
+            script_path: Path to the script that failed.
+            error_info: The error message or traceback from the failure.
+            context: Optional additional context or user feedback.
+            
+        Returns:
+            True if a repair was attempted, False otherwise.
         """
         log("Attempting repair...")
         
@@ -85,7 +94,7 @@ Ensure:
         self._save_log(f"repair_response_{int(time.time())}.py", new_code)
         
         # Robust extraction
-        new_code = self._extract_python_code(new_code)
+        new_code = self.client.extract_python_code(new_code)
         
         # Save attempt
         with open(script_path, "w", encoding="utf-8") as f:
@@ -94,55 +103,20 @@ Ensure:
         log("Repaired script saved.")
         return True
 
-    def _save_log(self, filename: str, content: str):
+    def _save_log(self, filename: str, content: str) -> None:
         log_dir = self.project_dir / "llm_logs"
         log_dir.mkdir(exist_ok=True)
         with open(log_dir / filename, "w", encoding="utf-8") as f:
             f.write(content)
 
-    def _load_json(self, filename: str):
-        """Load a JSON file from project directory."""
+    def _load_json(self, filename: str) -> Optional[Dict[str, Any]]:
+        """Loads a JSON file from the project directory.
+        
+        Args:
+            filename: Name of the JSON file to load.
+            
+        Returns:
+            The parsed JSON data or None if loading fails.
+        """
         path = self.project_dir / filename
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except:
-                return None
-        return None
-
-    def _extract_python_code(self, text: str) -> str:
-        """Extract Python code from LLM response."""
-        # Try to find code in markdown fence
-        pattern = r"```(?:python)?\s*([\s\S]*?)```"
-        matches = re.findall(pattern, text)
-        if matches:
-            code = max(matches, key=len)
-            return code.strip()
-        
-        # If no fence, find where code starts
-        lines = text.split('\n')
-        code_start = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(('import ', 'from ', 'class ', 'def ', 'async def ', '#!')):
-                code_start = i
-                break
-        
-        code = '\n'.join(lines[code_start:])
-        code = code.strip()
-        
-        # Post-extraction fixes for common LLM hallucinations
-        # 1. Broadly replace async_playwright package hits with the correct async path
-        code = re.sub(r'\bfrom\s+async_playwright\.async_api\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
-        
-        # 2. Fix specific common mis-imports that the broad rule might leave weird
-        code = re.sub(r'from\s+playwright\.async_api\s+import\s+async_playwright\.async_api', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
-        
-        # 3. Ensure any stray 'async_playwright.async_api' (as a package) is corrected
-        code = re.sub(r'\basync_playwright\.async_api\b', 'playwright.async_api', code, flags=re.IGNORECASE)
-        code = re.sub(r'\basync_playwright\b', 'playwright.async_api', code, flags=re.IGNORECASE)
-
-        return code
+        return safe_read_json(path, default=None)

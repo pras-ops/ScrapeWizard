@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Tuple, Optional
 from scrapewizard.core.logging import log
@@ -16,7 +17,7 @@ class ScriptTester:
         Returns (success, output/error_message).
         """
         if not wizard_mode:
-            log(f"Running execution: {script_path} (timeout: {timeout}s)")
+            log(f"Running execution: {script_path.name} (timeout: {timeout}s)")
         
         try:
             # Run with python -u (unbuffered)
@@ -28,7 +29,7 @@ class ScriptTester:
                 timeout=timeout
             )
             
-            output = result.stdout + "\n" + result.stderr
+            output = f"{result.stdout}\n{result.stderr}"
             
             if result.returncode == 0:
                 # Basic check: did it crash?
@@ -39,9 +40,14 @@ class ScriptTester:
                 else:
                     return False, f"Script ran but produced no data.\nOutput:\n{output}"
             else:
-                return False, output
+                return False, f"Process exited with code {result.returncode}.\nOutput:\n{output}"
                 
         except subprocess.TimeoutExpired:
+            log(f"Execution timed out after {timeout}s", level="warning")
             return False, f"Execution timed out ({timeout}s)."
+        except PermissionError as e:
+            log(f"Permission denied executing script: {e}", level="error")
+            return False, f"Permission denied executing script: {e}"
         except Exception as e:
-            return False, f"Execution failed to start: {e}"
+            log(f"Unexpected execution error: {traceback.format_exc()}", level="error")
+            return False, f"Unexpected execution error: {e}"
