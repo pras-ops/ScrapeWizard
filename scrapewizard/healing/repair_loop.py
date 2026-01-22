@@ -8,10 +8,11 @@ class RepairLoop:
     """
     Manages the test-fail-repair cycle with optional column-specific hints.
     """
-    def __init__(self, project_dir: Path):
+    def __init__(self, project_dir: Path, wizard_mode: bool = False):
         self.project_dir = project_dir
         self.agent = RepairAgent(project_dir)
         self.max_attempts = 2
+        self.wizard_mode = wizard_mode
 
     def run(
         self, 
@@ -28,32 +29,39 @@ class RepairLoop:
         
         while attempts <= self.max_attempts:
             if attempts > 0:
-                log(f"Repair attempt {attempts}/{self.max_attempts}...")
+                if not self.wizard_mode:
+                    log(f"Repair attempt {attempts}/{self.max_attempts}...")
             
             # Run the test
             success, output = test_runner()
             
             if success:
-                log("Verification successful!" if attempts > 0 else "Test passed.")
+                if not self.wizard_mode:
+                    log("Verification successful!" if attempts > 0 else "Test passed.")
                 return True
             
             # Failed
-            log(f"Test failed. Output: {output[:300]}...")
+            if not self.wizard_mode:
+                log(f"Test failed. Output: {output[:300]}...")
             if attempts == self.max_attempts:
-                log("Max repair attempts reached.", level="error")
+                if not self.wizard_mode:
+                    log("Max repair attempts reached.", level="error")
                 return False
                 
             error_type = ErrorClassifier.classify(output)
-            log(f"Detected error type: {error_type}")
+            if not self.wizard_mode:
+                log(f"Detected error type: {error_type}")
             
             if not ErrorClassifier.is_recoverable(error_type):
-                log("Error is likely not recoverable via code changes.", level="warning")
+                if not self.wizard_mode:
+                    log("Error is likely not recoverable via code changes.", level="warning")
             
             # Build context with column hints if provided
             context = ""
             if column_hints:
                 context = f"USER FEEDBACK: The following columns have incorrect/missing data: {', '.join(column_hints)}. Please fix the selectors for these fields."
-                log(f"Including user feedback about columns: {column_hints}")
+                if not self.wizard_mode:
+                    log(f"Including user feedback about columns: {column_hints}")
             
             # Call repair
             try:

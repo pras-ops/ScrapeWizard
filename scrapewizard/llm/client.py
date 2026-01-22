@@ -50,7 +50,10 @@ class LLMClient:
         # Security redaction
         clean_user = SecurityManager.redact_text(user_prompt)
         
-        log(f"Calling LLM ({self.model})...")
+        # Wizard mode: hidden
+
+        
+        # log(f"Calling LLM...")
         
         kwargs = {
             "model": self.model,

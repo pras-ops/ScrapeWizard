@@ -6,14 +6,19 @@ ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropi
 
 ## Features
 
-- **Behavioral Analysis**: Measures DOM stability, mutations, and network activity (XHR/API) during recon.
-- **Human-in-the-Loop (HITL)**: Pauses for manual CAPTCHA solving or 2FA/login bypass when needed.
-- **Adaptive Browser Mode**: Automatically decides between Headless and Headed mode based on anti-bot signals.
-- **Session Persistence (Storage State)**: Captures cookies, LocalStorage, and SessionStorage to bypass complex auth (JWT/Tokens) autonomously in future runs.
-- **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust code.
-- **Offline First & Portable**: Generated scrapers use absolute path discovery, ensuring they run from any directory without AI dependency.
-- **Self-Healing**: Automatically repairs broken selectors post-generation.
-- **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration.
+- **🧙 Wizard Mode (Default)**: Simple, friendly interface for non-technical users - just give it a URL and get data
+- **Stealth Probe Pre-Scan**: Brief headed browser probe (3-5s) to trigger real bot defenses before asking user about access mode
+- **Sign-In Detection**: Automatically detects authentication requirements (login buttons, auth prompts) and forces Guided mode for auth-heavy platforms (Amazon, LinkedIn, Facebook, Twitter)
+- **Behavioral Analysis**: Measures DOM stability, mutations, and network activity (XHR/API) during recon
+- **Unified Guided Access**: Seamlessly handles Login, CAPTCHAs, and complex navigation (e.g. Amazon Search) via a "Guided" headed browser session
+- **Bot Defense Scanner**: Automatically detects hostile anti-bot systems (Akamai, DataDome, PerimeterX) and forces "Guided Mode" to ensure success
+- **Earned Headless Mode**: Automatically recommends "Guided" mode for complex SPAs, ensuring session stability before attempting headless execution
+- **Session Persistence (Storage State)**: Captures cookies, LocalStorage, and SessionStorage to bypass complex auth (JWT/Tokens) autonomously in future runs
+- **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust code
+- **Offline First & Portable**: Generated scrapers use absolute path discovery, ensuring they run from any directory without AI dependency
+- **Self-Healing**: Automatically repairs broken selectors post-generation
+- **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration
+- **Expert Mode**: Full technical output via `--expert` flag for power users and debugging
 
 ## Installation
 
@@ -32,15 +37,31 @@ python -m scrapewizard.cli.main setup
 
 ### 2. `scrape` - Build a Scraper
 The main command to start a new scraping project.
+
+**Wizard Mode (Default - Simple & Friendly):**
 ```bash
-# Basic usage (Tip: Quote the URL if it contains special characters like parentheses)
-python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com"
+# Just provide the URL - ScrapeWizard handles the rest
+python -m scrapewizard.cli.main scrape --url "https://www.amazon.in/s?k=phones"
 
-# Non-interactive CI mode (auto-accepts defaults)
+# What you see: Clean, emoji-driven progress
+# 🧙 ScrapeWizard
+# Opening the website…
+# Checking the website…
+# [Interactive prompts if needed]
+# 🧠 Understanding this page…
+# ✅ Done!
+```
+
+**Expert Mode (Full Technical Output):**
+```bash
+# Shows debug logs, state transitions, LLM warnings, repair loops
+python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com" --expert
+```
+
+**CI Mode (Non-Interactive):**
+```bash
+# Auto-accepts defaults, no prompts
 python -m scrapewizard.cli.main scrape --url https://books.toscrape.com --ci
-
-# Verbose mode for debugging
-python -m scrapewizard.cli.main scrape --url https://books.toscrape.com --verbose
 ```
 
 ### 3. `list` - View Projects

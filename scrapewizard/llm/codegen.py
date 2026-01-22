@@ -10,15 +10,17 @@ class CodeGenerator:
     """
     Handles LLM Code Generation phase.
     """
-    def __init__(self, project_dir: Path):
+    def __init__(self, project_dir: Path, wizard_mode: bool = False):
         self.client = LLMClient()
         self.project_dir = project_dir
+        self.wizard_mode = wizard_mode
 
     def generate(self, snapshot: Dict, understanding: Dict, run_config: Dict, scan_profile: Dict = None, interaction: Dict = None):
         """
         Generate the scraper based on inputs.
         """
-        log("Generating scraper code...")
+        if not self.wizard_mode:
+            log("Generating scraper code...")
         
         # Check for session state
         has_storage = (self.project_dir / "storage_state.json").exists()
@@ -36,12 +38,24 @@ class CodeGenerator:
         elif has_cookies:
             cookies_context = "- A 'cookies.json' file exists. GENERATE CODE TO LOAD THESE COOKIES into the browser context BEFORE navigating to the target URL. Use absolute paths based on the script directory.\n"
         
+        # Hostility Override - Make hostility score visible to LLM
+        hostility_score = scan_profile.get("hostility_score", 0) if scan_profile else 0
+        hostility_context = ""
+        if hostility_score >= 40:
+            hostility_context = f"""
+⚠️ HOSTILITY ALERT: This site has a hostility score of {hostility_score}/100.
+Bot defense mechanisms detected. You MUST use headed mode (headless=False).
+DO NOT use headless mode under any circumstances.
+"""
+        
         user_prompt = f"""
 Analysis Snapshot: {json.dumps(snapshot, indent=2)}
 LLM Understanding: {json.dumps(understanding, indent=2)}
 Run Config: {json.dumps(run_config, indent=2)}
 Behavioral Scan Profile: {json.dumps(scan_profile, indent=2) if scan_profile else "None"}
 Interaction: {json.dumps(interaction, indent=2) if interaction else "None"}
+
+{hostility_context}
 
 Generate the full 'generated_scraper.py'.
 IMPORTANT: Output ONLY valid Python code. No explanations, no markdown, no comments before the code.
@@ -66,7 +80,8 @@ The script must:
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(code)
             
-        log(f"Scraper generated at {output_path}")
+        if not self.wizard_mode:
+            log(f"Scraper generated at {output_path}")
         return output_path
 
     def _save_log(self, filename: str, content: str):
@@ -103,6 +118,7 @@ The script must:
         
         # Post-extraction fixes for common LLM hallucinations
         # 1. Broadly replace async_playwright package hits with the correct async path
+        code = re.sub(r'\bfrom\s+async_playwright\.async_api\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
         
@@ -111,5 +127,6 @@ The script must:
         
         # 3. Ensure any stray 'async_playwright.async_api' (as a package) is corrected
         code = re.sub(r'\basync_playwright\.async_api\b', 'playwright.async_api', code, flags=re.IGNORECASE)
+        code = re.sub(r'\basync_playwright\b', 'playwright.async_api', code, flags=re.IGNORECASE)
 
         return code

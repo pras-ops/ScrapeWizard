@@ -10,12 +10,13 @@ class ScriptTester:
     """
     
     @classmethod
-    def run_test(cls, script_path: Path, cwd: Path, timeout: int = 60) -> Tuple[bool, str]:
+    def run_test(cls, script_path: Path, cwd: Path, timeout: int = 60, wizard_mode: bool = False) -> Tuple[bool, str]:
         """
         Run the script in a subprocess.
         Returns (success, output/error_message).
         """
-        log(f"Running execution: {script_path} (timeout: {timeout}s)")
+        if not wizard_mode:
+            log(f"Running execution: {script_path} (timeout: {timeout}s)")
         
         try:
             # Run with python -u (unbuffered)

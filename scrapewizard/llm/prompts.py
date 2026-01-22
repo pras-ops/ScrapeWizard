@@ -60,6 +60,8 @@ CRITICAL RULES:
 10. Respect the 'recommended_browser_mode' from the analysis:
     - If "headed", use `browser = await p.chromium.launch(headless=False)`.
     - If "headless", use `browser = await p.chromium.launch(headless=True)`.
+    - CRITICAL: If 'hostility_score' >= 40 in the scan profile, you MUST use headed mode.
+      Headless mode is FORBIDDEN for hostile sites, regardless of other factors.
 
 OUTPUT FORMAT HANDLING:
 - If format is "xlsx": Use pandas to save to 'output/data.xlsx' (import pandas as pd)

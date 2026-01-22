@@ -12,21 +12,15 @@ class UI:
     Handles all interactive user prompts with rich display.
     """
     
-    @staticmethod
-    def ask_login_required() -> bool:
-        """Step 3: Ask if sites needs login."""
-        return inquirer.select(
-            message="Does this site require login or navigation to reach data?",
-            choices=[
-                Choice(name="No (Public Site)", value=False),
-                Choice(name="Yes (Login / Click-through)", value=True)
-            ],
-            default=False
-        ).execute()
 
     @staticmethod
-    def confirm_browser_mode(recommended: str, reason: str) -> str:
+    def confirm_browser_mode(recommended: str, reason: str, wizard_mode: bool = False) -> str:
         """Ask user to confirm browser mode (headless vs headed)."""
+        # Wizard mode: auto-decide, no prompt
+        if wizard_mode:
+            return recommended
+        
+        # Expert mode: show prompt
         console.print(f"\n[bold cyan]🔍 Browser Mode Analysis[/bold cyan]")
         color = "yellow" if recommended == "headed" else "green"
         console.print(f"Recommended: [{color}]{recommended.upper()}[/{color}]")
@@ -44,7 +38,46 @@ class UI:
     @staticmethod
     def ask_save_credentials() -> bool:
         return inquirer.confirm(message="Save username/password for the generated script?").execute()
-    
+    @staticmethod
+    def ask_access_mode(recommendation: str = "automatic", reason: str = "") -> str:
+        """
+        Step 3: Unified Access Mode Selection.
+        Replaces 'Does this site require login?' with a smarter choice.
+        """
+        console.print(f"\n[bold cyan]🔐 Access Mode Recommendation[/bold cyan]")
+        
+        if recommendation == "guided":
+            if "Hostile" in reason:
+                # Wizard Mode: No choice, explanation only
+                console.print(f"[bold red]🛡️  Bot Protection Detected[/bold red]")
+                console.print(f"[yellow]This website uses active bot defenses ({reason}).[/yellow]")
+                console.print("[white]ScrapeWizard will open a real browser so you can navigate normally.[/white]")
+                console.print("[dim]Headless mode is disabled to prevent blocking.[/dim]")
+                return inquirer.select(
+                    message="Proceed with Guided Access?",
+                    choices=[Choice(name="Open Browser (Guided)", value="guided")],
+                    default="guided"
+                ).execute()
+            
+            console.print(f"[yellow]⚠️  System recommends: GUIDED ACCESS (Headed)[/yellow]")
+            console.print(f"[dim]Reason: {reason}[/dim]")
+            default_val = "guided"
+        else:
+            console.print(f"[green]✅ System recommends: AUTOMATIC (Headless)[/green]")
+            console.print(f"[dim]Reason: {reason or 'Site appears static and safe.'}[/dim]")
+            default_val = "automatic"
+
+        console.print()
+        
+        return inquirer.select(
+            message="How should ScrapeWizard reach the target data?",
+            choices=[
+                Choice(name="Automatic (Headless, fastest)", value="automatic"),
+                Choice(name="Guided (Open real browser, I will navigate manually)", value="guided")
+            ],
+            default=default_val
+        ).execute()
+
     @staticmethod
     def prompt_credentials() -> Dict[str, str]:
         username = inquirer.text(message="Username:").execute()
@@ -101,9 +134,10 @@ class UI:
         console.print(f"[green]Selected {len(selected)} field(s)[/green]")
         return selected
 
+
     @staticmethod
     def ask_pagination() -> str:
-        """Step 6.2: Pagination."""
+        """Step 6.3: Pagination."""
         return inquirer.select(
             message="Pagination Strategy:",
             choices=[
@@ -115,7 +149,7 @@ class UI:
 
     @staticmethod
     def ask_format() -> str:
-        """Step 6.3: Output Format."""
+        """Step 6.4: Output Format."""
         return inquirer.select(
             message="Output Format:",
             choices=[

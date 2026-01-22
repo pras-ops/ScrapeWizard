@@ -9,15 +9,17 @@ class UnderstandingAgent:
     """
     Handles the 'Understanding & Feasibility' phase using LLM.
     """
-    def __init__(self, project_dir: Path):
+    def __init__(self, project_dir: Path, wizard_mode: bool = False):
         self.client = LLMClient()
         self.project_dir = project_dir
+        self.wizard_mode = wizard_mode
 
     def analyze(self, snapshot_data: Dict, scan_profile: Dict = None, interaction_log: Dict = None) -> Dict:
         """
         Send snapshot to LLM to understand structure.
         """
-        log("Sending analysis snapshot to LLM...")
+        if not self.wizard_mode:
+            log("Sending analysis snapshot to LLM...")
         
         user_prompt = f"""
         Here is the analysis of the webpage:

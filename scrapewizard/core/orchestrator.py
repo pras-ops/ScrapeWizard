@@ -28,28 +28,32 @@ class Orchestrator:
     Uses synchronous flow with isolated async blocks for browser operations.
     """
 
-    def __init__(self, project_dir: Path, ci_mode: bool = False):
+    def __init__(self, project_dir: Path, ci_mode: bool = False, wizard_mode: bool = True):
         self.project_dir = Path(project_dir)
         self.ci_mode = ci_mode
+        self.wizard_mode = wizard_mode  # Default: friendly UI
+        self._working_shown = False  # Track working message
         self.session = ProjectManager.load_project(str(self.project_dir))
         if not self.session:
             raise ValueError(f"Invalid project directory: {project_dir}")
         
     def run(self):
         """Main execution loop (synchronous)."""
-        log("Starting Orchestrator loop...")
-        if self.ci_mode:
-            log("CI Mode enabled: Automatic defaults will be used.")
+        if not self.wizard_mode:
+            log("Starting Orchestrator loop...")
+            if self.ci_mode:
+                log("CI Mode enabled: Automatic defaults will be used.")
             
         while self.session["state"] != State.DONE.value and self.session["state"] != State.FAILED.value:
             current_state = self.session["state"]
-            log(f"Current State: {current_state}")
+            if not self.wizard_mode:
+                log(f"Current State: {current_state}")
             
             try:
                 if current_state == State.INIT.value:
                     self._handle_init()
-                elif current_state == State.LOGIN.value:
-                    self._handle_login()
+                elif current_state == State.LOGIN.value or current_state == State.GUIDED_ACCESS.value:
+                    self._handle_guided_access()
                 elif current_state == State.RECON.value:
                     self._handle_recon()
                 elif current_state == State.LLM_ANALYSIS.value:
@@ -67,7 +71,8 @@ class Orchestrator:
                 elif current_state == State.APPROVED.value:
                     self._handle_final_run()
                 else:
-                    log(f"State {current_state} not handled.", level="error")
+                    if not self.wizard_mode:
+                        log(f"State {current_state} not handled.", level="error")
                     break
                     
                 ProjectManager.save_state(self.project_dir, self.session)
@@ -81,45 +86,97 @@ class Orchestrator:
                 raise
 
     def _transition_to(self, new_state: State):
-        log(f"Transitioning: {self.session['state']} -> {new_state.value}")
+        if not self.wizard_mode:
+            log(f"Transitioning: {self.session['state']} -> {new_state.value}")
         self.session["state"] = new_state.value
 
     def _handle_init(self):
-        """Step 3: Ask user if login is required."""
-        if self.ci_mode:
-            login_required = False # Default to non-interactive
-        else:
-            login_required = UI.ask_login_required()
-            
-        interaction_log = {"login_required": login_required, "steps": []}
+        """Step 3: Analyze complexity -> Ask Access Mode."""
+        # Wizard mode: Show friendly welcome
+        if self.wizard_mode:
+            print("\n🧙 ScrapeWizard\n")
+            print("Opening the website…\n")
         
-        with open(self.project_dir / "interaction.json", "w", encoding="utf-8") as f:
-            json.dump(interaction_log, f, indent=2)
-            
-        if login_required:
-            self._transition_to(State.LOGIN)
-        else:
-            self._transition_to(State.RECON)
-
-    def _handle_login(self):
-        """Manual login via visible browser."""
         if self.ci_mode:
-            log("CI Mode: Bypassing manual login. Proceeding to RECON.", level="warning")
+            log("CI Mode: Skipping complexity check, defaulting to Automatic.")
             self._transition_to(State.RECON)
             return
 
-        log("Starting interactive login...")
+        # 1. Run Pre-Scan in Stealth Probe mode (headed, not guided)
+        if not self.wizard_mode:
+            log("Running Pre-Scan to determine site complexity...")
+        
+        if self.wizard_mode:
+            print("Checking the website…\n")
+        
+        # Pre-Scan uses HEADED mode to trigger real bot defenses (Akamai, PerimeterX, etc.)
+        # This is a silent probe - no user interaction required
+        async def do_prescan():
+            browser = BrowserManager(headless=False, wizard_mode=self.wizard_mode)  # Stealth Probe
+            await browser.start()
+            try:
+                scanner = Scanner(browser.page)
+                return await scanner.scan(self.session["url"], wizard_mode=self.wizard_mode)
+            finally:
+                await browser.close()
+
+        profile = asyncio.run(do_prescan())
+        
+        rec = profile.get("access_recommendation", "automatic")
+        score = profile.get("complexity_score", 0)
+        reasons = ", ".join(profile.get("complexity_reasons", []))
+        
+        if not self.wizard_mode:
+            log(f"Complexity Analysis: Score={score}, Rec={rec}, Reasons={reasons}")
+
+        # 2. Ask User (or auto-decide in wizard mode)
+        if self.wizard_mode:
+            # Wizard mode: auto-decide, no question
+            mode = rec  # Use scanner recommendation directly
+            if mode == "guided":
+                print("\n🌐 This website blocks bots, so we'll open a real browser.\n")
+                print("Please use the browser like you normally would:")
+                print("  • Log in if needed")
+                print("  • Search or filter to what you want")
+                print("  • Scroll until the items you want are visible\n")
+                print("When the screen shows exactly what you want scraped,")
+                print("come back here and press Enter.\n")
+        else:
+            # Expert mode: ask user
+            mode = UI.ask_access_mode(recommendation=rec, reason=reasons)
+            
+        interaction_log = {"access_mode": mode, "complexity_score": score, "steps": []}
+        with open(self.project_dir / "interaction.json", "w", encoding="utf-8") as f:
+            json.dump(interaction_log, f, indent=2)
+            
+        if mode == "guided":
+            self._transition_to(State.GUIDED_ACCESS)
+        else:
+            self._transition_to(State.RECON)
+
+    def _handle_guided_access(self):
+        """Guided Access via visible browser (Replaces Login)."""
+        if self.ci_mode:
+            log("CI Mode: Bypassing guided access. Proceeding to RECON.", level="warning")
+            self._transition_to(State.RECON)
+            return
+
+        if not self.wizard_mode:
+            log("Starting Guided Access Phase...")
         
         async def do_login():
-            browser = BrowserManager(headless=False)
+            browser = BrowserManager(headless=False, wizard_mode=self.wizard_mode)
             await browser.start()
             try:
                 url = self.session["url"]
-                print(f"Please log in to {url} in the browser window.")
-                print("Navigate to the target page you want to scrape.")
+                print(f"Opening {url} ...")
+                print("1. Please Navigate / Search / Filter to reach your target data.")
+                print("2. Log in if required.")
+                print("3. Ensure the data you want to scrape is VISIBLE on screen.")
+                print("   (ScrapeWizard will capture your final page state and session)")
                 await browser.navigate(url)
                 
-                input("Press ENTER after you have logged in and reached the target page...")
+                input("Press ENTER when you are ready to scrape this exact view...")
                 
                 cookies = await browser.get_cookies()
                 storage_state = await browser.get_storage_state()
@@ -150,7 +207,10 @@ class Orchestrator:
 
     def _handle_recon(self):
         """Run browser reconnaissance."""
-        log("Starting Reconnaissance...")
+        if self.wizard_mode:
+            print("\n🧠 Understanding this page…\n")
+        else:
+            log("Starting Reconnaissance...")
         
         cookies = None
         cookie_file = self.project_dir / "cookies.json"
@@ -167,7 +227,7 @@ class Orchestrator:
         async def do_recon():
             # Use headed mode if login was performed, as requested by user
             use_headless = not self.session.get("login_performed", False)
-            browser = BrowserManager(headless=use_headless, storage_state=storage_state)
+            browser = BrowserManager(headless=use_headless, storage_state=storage_state, wizard_mode=self.wizard_mode)
             await browser.start()
             try:
                 # If no storage_state but we have legacy cookies, inject them
@@ -178,7 +238,7 @@ class Orchestrator:
                 
                 # 1. Run Behavioral Scan
                 scanner = Scanner(browser.page)
-                scan_profile = await scanner.scan(self.session["url"])
+                scan_profile = await scanner.scan(self.session["url"], wizard_mode=self.wizard_mode)
                 
                 # Save Scan Profile
                 with open(self.project_dir / "scan_profile.json", "w", encoding="utf-8") as f:
@@ -275,7 +335,7 @@ class Orchestrator:
 
     def _handle_llm_analysis(self):
         """Call LLM for understanding."""
-        agent = UnderstandingAgent(self.project_dir)
+        agent = UnderstandingAgent(self.project_dir, wizard_mode=self.wizard_mode)
         
         with open(self.project_dir / "analysis_snapshot.json", "r") as f:
             snapshot = json.load(f)
@@ -299,7 +359,9 @@ class Orchestrator:
                 return
         else:
             if not understanding.get("scraping_possible", False):
-                if not UI.override_llm_hallucination(understanding.get("reason", "Unknown")):
+                if self.wizard_mode:
+                    pass  # Wizard mode: auto-continue
+                elif not UI.override_llm_hallucination(understanding.get("reason", "Unknown")):
                     self._transition_to(State.FAILED)
                     return
 
@@ -331,7 +393,7 @@ class Orchestrator:
                 recommended_mode = "headed"
                 reason = "Login was performed earlier. Headed mode is REQUIRED to maintain the authenticated session and bypass anti-bot measures."
 
-            browser_mode = UI.confirm_browser_mode(recommended_mode, reason)
+            browser_mode = UI.confirm_browser_mode(recommended_mode, reason, wizard_mode=self.wizard_mode)
         
         config = {
             "fields": fields,
@@ -347,7 +409,7 @@ class Orchestrator:
 
     def _handle_codegen(self):
         """Generate scraper code via LLM."""
-        agent = CodeGenerator(self.project_dir)
+        agent = CodeGenerator(self.project_dir, wizard_mode=self.wizard_mode)
         
         with open(self.project_dir / "analysis_snapshot.json") as f: 
             snapshot = json.load(f)
@@ -370,16 +432,19 @@ class Orchestrator:
 
     def _handle_test(self):
         """Run auto-test on generated scraper with rich data preview."""
-        log("Running auto-test on generated scraper...")
+        if not self.wizard_mode:
+            log("Running auto-test on generated scraper...")
         
         success, output = ScriptTester.run_test(
             self.project_dir / "generated_scraper.py",
             self.project_dir,
-            timeout=120
+            timeout=120,
+            wizard_mode=self.wizard_mode
         )
         
         if success:
-            log("Test Passed!")
+            if not self.wizard_mode:
+                log("Test Passed!")
             
             # Load and preview the data
             data = self._load_output_data()
@@ -406,10 +471,12 @@ class Orchestrator:
                     self._transition_to(State.REPAIR)
                 elif action == "retry":
                     # Go back to codegen
-                    log("User requested regeneration.")
+                    if not self.wizard_mode:
+                        log("User requested regeneration.")
                     self._transition_to(State.CODEGEN)
                 else:  # abort
-                    log("User aborted.")
+                    if not self.wizard_mode:
+                        log("User aborted.")
                     self._transition_to(State.DONE)
             else:
                 # No data but script ran - simple approval
@@ -434,7 +501,7 @@ class Orchestrator:
 
     def _handle_repair(self):
         """Self-healing repair loop with optional column-specific hints."""
-        loop = RepairLoop(self.project_dir)
+        loop = RepairLoop(self.project_dir, wizard_mode=self.wizard_mode)
         
         # Check if user flagged specific columns
         fix_columns = self.session.get("fix_columns", None)
@@ -447,7 +514,8 @@ class Orchestrator:
             return ScriptTester.run_test(
                 self.project_dir / "generated_scraper.py",
                 self.project_dir,
-                timeout=120
+                timeout=120,
+                wizard_mode=self.wizard_mode
             )
         
         # Run repair with column hints if available
@@ -471,14 +539,17 @@ class Orchestrator:
                     self._transition_to(State.APPROVED)
                 elif action == "fix_columns":
                     self.session["fix_columns"] = bad_cols
-                    log("User requested another fix round.")
+                    if not self.wizard_mode:
+                        log("User requested another fix round.")
                     # Stay in REPAIR but we've exhausted attempts
                     self._transition_to(State.FAILED)
                 elif action == "retry":
-                    log("User requested regeneration.")
+                    if not self.wizard_mode:
+                        log("User requested regeneration.")
                     self._transition_to(State.CODEGEN)
                 else:
-                    log("User aborted.")
+                    if not self.wizard_mode:
+                        log("User aborted.")
                     self._transition_to(State.DONE)
             else:
                 if UI.approve_run():
@@ -486,27 +557,39 @@ class Orchestrator:
                 else:
                     self._transition_to(State.DONE)
         else:
-            log("Repair failed. Proceeding to DONE (failed state).")
+            if not self.wizard_mode:
+                log("Repair failed. Proceeding to DONE (failed state).")
             self._transition_to(State.FAILED)
 
     def _handle_final_run(self):
         """Final scraping run and bundle output."""
-        log("Starting Final Run...")
+        if not self.wizard_mode:
+            log("Starting Final Run...")
         
         # Final run gets a much longer timeout (10 minutes)
         success, output = ScriptTester.run_test(
             self.project_dir / "generated_scraper.py",
             self.project_dir,
-            timeout=600 
+            timeout=600,
+            wizard_mode=self.wizard_mode
         )
         
         if success:
             # Bundle all project files into output folder
             self._bundle_output()
-            log(f"Final run complete. All files bundled in {self.project_dir}/output")
+            
+            if self.wizard_mode:
+                output_format = self.session.get('format', 'xlsx')
+                output_file = self.project_dir / "output" / f"data.{output_format}"
+                print(f"\n✅ Done!\n")
+                print(f"Your data is ready:")
+                print(f"{output_file}\n")
+            else:
+                log(f"Final run complete. All files bundled in {self.project_dir}/output")
             self._transition_to(State.DONE)
         else:
-            log("Final run failed.")
+            if not self.wizard_mode:
+                log("Final run failed.")
             self._transition_to(State.FAILED)
 
     def _bundle_output(self):
@@ -551,4 +634,5 @@ class Orchestrator:
                 shutil.rmtree(llm_logs_dst)
             shutil.copytree(llm_logs_src, llm_logs_dst)
         
-        log("Project files bundled into output folder.")
+        if not self.wizard_mode:
+            log("Project files bundled into output folder.")

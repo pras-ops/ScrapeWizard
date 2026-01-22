@@ -9,10 +9,11 @@ class BrowserManager:
     """
     Manages Playwright browser session for reconnaissance and recording.
     """
-    def __init__(self, headless: bool = True, proxy: Optional[Dict] = None, storage_state: Optional[Dict] = None):
+    def __init__(self, headless: bool = True, proxy: Optional[Dict] = None, storage_state: Optional[Dict] = None, wizard_mode: bool = False):
         self.headless = headless
         self.proxy = proxy
         self.storage_state = storage_state
+        self.wizard_mode = wizard_mode
         self.playwright = None
         self.browser = None
         self.context = None
@@ -26,6 +27,11 @@ class BrowserManager:
         launch_args = {
             "headless": self.headless,
         }
+        
+        # Add stealth arguments for headed mode to bypass automation detection
+        if not self.headless:
+            launch_args["args"] = ["--disable-blink-features=AutomationControlled"]
+        
         if self.proxy:
              launch_args["proxy"] = self.proxy
 
@@ -53,7 +59,8 @@ class BrowserManager:
 
     async def navigate(self, url: str):
         """Navigate to a URL with error handling."""
-        log(f"Navigating to {url}")
+        if not self.wizard_mode:
+            log(f"Navigating to {url}")
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await self.page.wait_for_timeout(2000) # Grace period
@@ -89,7 +96,8 @@ class BrowserManager:
         """
         # Define the bridge function to receive events from JS
         async def on_event(event_type, selector, value):
-            log(f"Recorded: {event_type} on {selector}")
+            if not self.wizard_mode:
+                log(f"Recorded: {event_type} on {selector}")
             self.recorded_events.append({
                 "type": event_type,
                 "selector": selector,

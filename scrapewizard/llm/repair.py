@@ -134,6 +134,7 @@ Ensure:
         
         # Post-extraction fixes for common LLM hallucinations
         # 1. Broadly replace async_playwright package hits with the correct async path
+        code = re.sub(r'\bfrom\s+async_playwright\.async_api\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)
         
@@ -142,5 +143,6 @@ Ensure:
         
         # 3. Ensure any stray 'async_playwright.async_api' (as a package) is corrected
         code = re.sub(r'\basync_playwright\.async_api\b', 'playwright.async_api', code, flags=re.IGNORECASE)
+        code = re.sub(r'\basync_playwright\b', 'playwright.async_api', code, flags=re.IGNORECASE)
 
         return code

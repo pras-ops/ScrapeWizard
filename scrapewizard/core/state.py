@@ -2,7 +2,8 @@ from enum import Enum, auto
 
 class State(Enum):
     INIT = "INIT"
-    LOGIN = "LOGIN"
+    LOGIN = "LOGIN"  # Legacy, kep for compatibility
+    GUIDED_ACCESS = "GUIDED_ACCESS"
     RECON = "RECON"
     INTERACTIVE_SOLVE = "INTERACTIVE_SOLVE"
     LLM_ANALYSIS = "LLM_ANALYSIS"

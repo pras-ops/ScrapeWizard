@@ -9,7 +9,8 @@ def scrape(
     url: str = typer.Option(..., help="Target URL to scrape"),
     headless: bool = typer.Option(True, help="Run browser in headless mode"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    ci: bool = typer.Option(False, "--ci", help="Run in non-interactive CI mode (auto-accept defaults)")
+    ci: bool = typer.Option(False, "--ci", help="Run in non-interactive CI mode (auto-accept defaults)"),
+    expert: bool = typer.Option(False, "--expert", help="Expert mode - show all technical details")
 ):
     """
     Start a new scraping session for a URL.
@@ -23,7 +24,11 @@ def scrape(
     # We don't have project dir yet, so just console log first
     Logger.setup_logging(verbose=verbose)
     
-    log(f"Initializing project for {url}...")
+    # Wizard mode is default (unless expert or ci flag)
+    wizard_mode = not expert and not ci
+
+    if not wizard_mode:
+        log(f"Initializing project for {url}...")
     
     try:
         session = ProjectManager.create_project(url)
@@ -33,11 +38,12 @@ def scrape(
         # Re-setup logging to include project logs
         Logger.setup_logging(log_dir=project_dir, verbose=verbose)
         
-        log(f"Project created: {project_id}")
-        log(f"Project directory: {project_dir}")
+        if not wizard_mode:
+            log(f"Project created: {project_id}")
+            log(f"Project directory: {project_dir}")
 
         # Start Orchestrator
-        orchestrator = Orchestrator(project_dir, ci_mode=ci)
+        orchestrator = Orchestrator(project_dir, ci_mode=ci, wizard_mode=wizard_mode)
         orchestrator.run()
         
     except Exception as e:
