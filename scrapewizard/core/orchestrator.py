@@ -25,6 +25,7 @@ from scrapewizard.core.constants import (
 from scrapewizard.utils.file_io import safe_read_json, safe_write_json
 
 from scrapewizard.interactive.ui import UI
+from scrapewizard.utils.ux import UX
 from scrapewizard.recon.browser import BrowserManager
 from scrapewizard.recon.scanner import Scanner
 from scrapewizard.recon.dom_analyzer import DOMAnalyzer
@@ -44,10 +45,11 @@ class Orchestrator:
     Uses synchronous flow with isolated async blocks for browser operations.
     """
 
-    def __init__(self, project_dir: Path, ci_mode: bool = False, wizard_mode: bool = True, guided_tour: bool = False):
+    def __init__(self, project_dir: Path, ci_mode: bool = False, wizard_mode: bool = True, guided_tour: bool = False, interactive_mode: bool = False):
         self.project_dir = Path(project_dir)
         self.ci_mode = ci_mode
-        self.wizard_mode = wizard_mode  # Default: friendly UI
+        self.wizard_mode = wizard_mode  # Default: Zero-Click logic
+        self.interactive_mode = interactive_mode # "One Smart Question" logic
         self.guided_tour = guided_tour
         self._working_shown = False  # Track working message
         self.session = ProjectManager.load_project(str(self.project_dir))
@@ -317,11 +319,7 @@ class Orchestrator:
         asyncio.run(do_login())
         
         # UI prompts AFTER async block
-        if UI.ask_save_credentials():
-            creds = UI.prompt_credentials()
-            with open(self.project_dir / ".env", "w", encoding="utf-8") as f:
-                f.write(f"USERNAME={creds['username']}\n")
-                f.write(f"PASSWORD={creds['password']}\n")
+        UX.print_success("Session captured (will reuse cookies in generated script)")
             
         self._transition_to(State.RECON)
 
@@ -425,30 +423,38 @@ class Orchestrator:
                 if await UI.wait_for_solve(reason="CAPTCHA or blocking screen detected."):
                     # Capture current state after solve
                     log("User confirmed solve. Re-scanning page state...")
-                    scanner = Scanner(browser.page)
-                    scan_profile = await scanner.scan(browser.page.url)
-                    
-                    safe_write_json(self.project_dir / "scan_profile.json", scan_profile)
+                    try:
+                        scanner = Scanner(browser.page)
+                        # Reduced timeout for these post-solve captures to fail fast if closed
+                        scan_profile = await scanner.scan(browser.page.url, timeout=10)
                         
-                    # Capture full storage state after solve
-                    storage_state = await browser.get_storage_state()
-                    safe_write_json(self.project_dir / "storage_state.json", storage_state)
+                        safe_write_json(self.project_dir / "scan_profile.json", scan_profile)
+                            
+                        # Capture full storage state after solve
+                        storage_state = await browser.get_storage_state()
+                        safe_write_json(self.project_dir / "storage_state.json", storage_state)
+                            
+                        html = await browser.get_content()
+                        analyzer = DOMAnalyzer(html)
+                        analysis = analyzer.analyze()
                         
-                    html = await browser.get_content()
-                    analyzer = DOMAnalyzer(html)
-                    analysis = analyzer.analyze()
-                    
-                    safe_write_json(self.project_dir / "analysis_snapshot.json", analysis)
-                        
-                    # Capture interaction: user solved captcha
-                    interaction = {"captcha_solved_manually": True, "final_url": browser.page.url}
-                    safe_write_json(self.project_dir / "interaction.json", interaction)
-                        
-                    # Also capture cookies to bypass future CAPTCHAs
-                    cookies = await browser.get_cookies()
-                    safe_write_json(self.project_dir / "cookies.json", cookies)
-                        
-                    log("Cookies saved for generated script.")
+                        safe_write_json(self.project_dir / "analysis_snapshot.json", analysis)
+                            
+                        # Capture interaction: user solved captcha
+                        interaction = {"captcha_solved_manually": True, "final_url": browser.page.url}
+                        safe_write_json(self.project_dir / "interaction.json", interaction)
+                            
+                        # Also capture cookies to bypass future CAPTCHAs
+                        cookies = await browser.get_cookies()
+                        safe_write_json(self.project_dir / "cookies.json", cookies)
+                            
+                        log("Cookies saved for generated script.")
+                    except Exception as e:
+                        if "TargetClosed" in str(e):
+                            log("Browser closed by user during capture. Aborting.", level="error")
+                        else:
+                            log(f"Error capturing post-solve state: {e}", level="error")
+                        return False
                 else:
                     log("User cancelled solve.", level="warning")
                     self._transition_to(State.FAILED)
@@ -506,39 +512,67 @@ class Orchestrator:
         else:
             all_fields = understanding.get("available_fields", [])
             
+            # Zero-Click / Wizard Mode Logic
             if self.wizard_mode:
-                # Wizard Mode: Suggest fields
+                # 1. Fields: Auto-suggest without prompting (unless interactive requested)
                 suggested = [f for f in all_fields if f.get('suggested')]
                 if not suggested:
-                    suggested = all_fields[:3] # Fallback to first 3 if none marked
+                    suggested = all_fields[:5] # Fallback
                 
-                self._narrate(f"I've found {len(all_fields)} potential fields. I recommend starting with: {', '.join([f['name'] for f in suggested])}.")
+                # Only ask if specifically interactive, otherwise just take suggestions
+                # (Note: self.interactive_mode logic would be passed here if we had that flag separately)
+                # For now, wizard_mode implies Zero-Click unless we find a way to pass 'interactive'
+                # But UI.ask_fields_wizard defaults to interactive dialog. 
+                # We need to change that: pass interactive=False by default for Zero-Click
                 
-                fields = UI.ask_fields_wizard(all_fields, suggested)
+                # Assumption: self.interactive_mode should be a new flag on Orchestrator
+                interactive = getattr(self, "interactive_mode", False)
+                fields = UI.ask_fields_wizard(all_fields, suggested, interactive=interactive)
                 
                 if fields == "retry":
                     self._narrate("Understood. I'll take a deeper look at the page structure.")
                     self._transition_to(State.RECON)
                     return
+
+                # Gate 1: Output Format (User owns WHAT)
+                fmt = UI.ask_format()
+
+                # Gate 2: Pagination Scope (User owns WHAT)
+                pagination = UI.ask_pagination()
+                
+                # Browser Mode: AI Recommendation (Orchestrator recommended WHEN)
+                browser_mode = understanding.get("recommended_browser_mode", "headless")
+                if self.session.get("login_performed", False):
+                     browser_mode = "headed"
+                
+                # Logic to convert UI choices to Runtime config
+                pagination_config = {
+                    "mode": "all" if pagination == "all_pages" else "first_page",
+                    "max_pages": 5 if pagination == "limit_5" else (50 if pagination == "all_pages" else 1)
+                }
+                
             else:
                 # Expert Mode: Full selection
                 fields = UI.ask_fields(all_fields)
+                pagination = UI.ask_pagination()
+                fmt = UI.ask_format()
+                recommended_mode = understanding.get("recommended_browser_mode", "headless")
+                reason = understanding.get("reason", "No reason provided")
+                if self.session.get("login_performed", False):
+                    recommended_mode = "headed"
+                    reason = "Login performed."
+                browser_mode = UI.confirm_browser_mode(recommended_mode, reason, wizard_mode=False)
                 
-            pagination = UI.ask_pagination()
-            fmt = UI.ask_format()
-            recommended_mode = understanding.get("recommended_browser_mode", "headless")
-            reason = understanding.get("reason", "No reason provided")
-            
-            # If login was performed, Force Headed as per user request
-            if self.session.get("login_performed", False):
-                recommended_mode = "headed"
-                reason = "Login was performed earlier. Headed mode is REQUIRED to maintain the authenticated session and bypass anti-bot measures."
-
-            browser_mode = UI.confirm_browser_mode(recommended_mode, reason, wizard_mode=self.wizard_mode)
+                # Expert Mode also needs pagination_config
+                pagination_config = {
+                    "mode": "all" if pagination == "all_pages" else "first_page",
+                    "max_pages": 5 if pagination == "limit_5" else (50 if pagination == "all_pages" else 1)
+                }
         
         config = {
             "fields": fields,
             "pagination": pagination,
+            "pagination_config": pagination_config,
             "format": fmt,
             "browser_mode": browser_mode
         }
@@ -604,7 +638,19 @@ class Orchestrator:
                 return
 
             if data:
-                # Use rich review flow
+                # Zero-Click / Wizard Mode Logic
+                if self.wizard_mode and not self.interactive_mode:
+                    has_issues = UI.show_smart_preview(data)
+                    
+                    if not has_issues:
+                        UX.print_success("Auto-test passed. Proceeding with full scrape.")
+                        self._transition_to(State.APPROVED)
+                        return
+                    else:
+                        # Fall through to manual review if issues found
+                        log("Data quality issues detected in Wizard Mode. Switching to manual review.")
+
+                # Interactive Mode: Detailed review
                 action, bad_cols = UI.review_data_quality(data)
                 
                 if action == "approve":
@@ -614,6 +660,11 @@ class Orchestrator:
                     self.session["fix_columns"] = bad_cols
                     log(f"User flagged columns for repair: {bad_cols}")
                     self._transition_to(State.REPAIR)
+                elif action == "guided":
+                    # Go back to GUIDED_ACCESS
+                    self.session["force_guided"] = True
+                    log("Switching to Guided Mode for manual page adjustment.")
+                    self._transition_to(State.GUIDED_ACCESS)
                 elif action == "retry":
                     # Go back to config, not just codegen
                     if not self.wizard_mode:
@@ -624,16 +675,27 @@ class Orchestrator:
                         log("User aborted.")
                     self._transition_to(State.DONE)
             else:
-                # No data but script ran - simple approval
-                if UI.approve_run():
-                    self._transition_to(State.APPROVED)
-                else:
-                    self._transition_to(State.DONE)
+                # No data...
+                if self.wizard_mode and not self.interactive_mode:
+                     UX.print_warning("Test run completed but no data returned. Check logs.")
+                     self._transition_to(State.DONE)
+                else: 
+                    # No data but script ran - simple approval
+                    if UI.approve_run():
+                        self._transition_to(State.APPROVED)
+                    else:
+                        self._transition_to(State.DONE)
         else:
-            if self.ci_mode:
+            if self.ci_mode or (self.wizard_mode and not self.interactive_mode):
+                # Auto-repair in Zero-Click mode? 
+                # For now, let's just fail or try one repair. 
+                # The prompt implies "Zero-Click" should just work or report.
                 log(f"Test Failed. Output: {output[:200]}...", level="error")
+                # Trigger repair automatically in Zero-Click?
+                # Let's try repair.
                 self._transition_to(State.REPAIR)
                 return
+
 
             action = UI.ask_test_failure_action(output)
             if action == "repair":

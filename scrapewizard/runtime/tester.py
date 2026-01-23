@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import traceback
@@ -20,13 +21,25 @@ class ScriptTester:
             log(f"Running execution: {script_path.name} (timeout: {timeout}s)")
         
         try:
+            # Ensure scrapewizard_runtime is in PYTHONPATH
+            # It's located in the workspace root
+            workspace_root = Path(__file__).parent.parent.parent
+            env = os.environ.copy()
+            python_path = env.get("PYTHONPATH", "")
+            if python_path:
+                python_path = str(workspace_root) + os.pathsep + python_path
+            else:
+                python_path = str(workspace_root)
+            env["PYTHONPATH"] = python_path
+
             # Run with python -u (unbuffered)
             result = subprocess.run(
                 [sys.executable, "-u", str(script_path.name)],
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                env=env
             )
             
             output = f"{result.stdout}\n{result.stderr}"

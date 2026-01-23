@@ -17,7 +17,7 @@ app.command()(utils.clean)
 app.command()(utils.doctor)
 app.command()(utils.resume)
 
-VERSION = "MVP-1.0.0"
+VERSION = "1.0.0"
 
 @app.command()
 def version():

@@ -21,11 +21,11 @@ The project follows a **Modular State Machine** architecture. Each step of the p
 4.  **INTERACTIVE_SOLVE**: If a CAPTCHA is detected, the system pauses for manual human bypass and captures session cookies.
 5.  **LLM_ANALYSIS**: AI looks at the DOM AND the Scan Profile to see if it's scrapable.
 6.  **USER_CONFIG**: User selects fields (Title, Price, etc.) and confirms the **Adaptive Browser Mode**.
-7.  **CODEGEN**: AI writes a standalone `generated_scraper.py` (with **Full Session Persistence** and **Absolute Path** support).
+7.  **CODEGEN**: AI implementation of the **Scraper Runtime Contract (SRC)**. It subclasses `BaseScraper` from `scrapewizard_runtime`.
 8.  **TEST & REPAIR**: The script runs. If it fails, the user is offered a **UX Firewall Choice**: Auto-Repair, Manual Edit, or Return to Config.
-9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Import** fixes and selector adjustments.
-10. **HARDENING**: The script is injected with absolute path discovery (`os.path.abspath`) for portability.
-11. **FINAL_RUN**: The polished script runs and saves cleaned data (JSON, CSV, Excel).
+9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Contract** fixes and selector adjustments using the SRC rules.
+10. **HARDENING**: The runtime automatically handles absolute path discovery (`os.path.abspath`) and output management.
+11. **FINAL_RUN**: The polished plugin runs via the ScrapeWizard SDK and saves cleaned data (JSON, CSV, Excel).
 
 ---
 
@@ -46,30 +46,29 @@ The Scan Profile provides insights into: DOM stability, mutations, scroll depend
 """
 ```
 
-### Agent B: The Coder (CodeGenerator)
-**Goal**: Write a production-ready Playwright script.
-**The "Stability First" Approach**: We strictly forbid the AI from using unique or transient IDs (like `id-t2_6l4z3`). Instead, it's instructed to find semantic, stable classes.
+### Agent B: The Plugin Developer (CodeGenerator)
+**Goal**: Write a scraper implementation using the ScrapeWizard SDK.
+**The Scraper Runtime Contract (SRC)**: We forbid the AI from touching infrastructure (Playwright setup, files, retries). It only implements page logic.
 
 **The Prompt**:
 ```python
 SYSTEM_PROMPT_CODEGEN = """
-SELECTOR STABILITY RULES (CRITICAL):
-1. NEVER use unique or transient IDs in selectors.
-2. Prefer semantic classes and stable structural patterns (e.g., .author, .title).
-3. Use the CSS SELECTORS from the analysis snapshot as a base.
+You MUST:
+- Subclass `BaseScraper`
+- Implement `navigate()`, `get_items()`, and `parse_item()`
+- Use `await self.runtime.smart_wait()` for dynamic stability.
 """
 ```
 
-### Agent C: The Doctor (RepairAgent)
-**Goal**: Fix the code if it fails.
-**Context is King**: We give the agent the code, the exact traceback, and the user's feedback.
+### Agent C: The Plugin Doctor (RepairAgent)
+**Goal**: Fix the plugin logic if it fails.
+**Contract Enforcement**: The agent fixes selectors or DOM traversal but is strictly prohibited from modifying the browser runtime.
 
 **The Prompt**:
 ```python
 SYSTEM_PROMPT_REPAIR = """
-You are a debugging expert. 
-You will be given the original script, the error message, and the DOM context.
-Return the COMPLETE corrected script. Start with an import statement.
+You MUST fix the provided scraper plugin (subclass of `BaseScraper`).
+Ensure selector stability and fix logic errors.
 """
 ```
 
@@ -98,14 +97,12 @@ Instead of just grabbing the HTML, we "observe" the page and its traffic.
 ### 3. DOM Analysis 2.0 (Scoring & Filtering)
 We don't just find all repeating classes. We score them based on "Richness" (how many child fields they have). This ensures we pick the main product list instead of the footer links.
 
-### 4. Observability & Self-Healing
-Every LLM call is logged to `llm_logs/`. 
-- `codegen_response.py`: See what the AI originally wrote.
-- `repair_response_X.py`: See how the AI tried to fix the error.
-- **Bulletproof Imports**: RegEx-based post-processor corrects common import hallucinations (e.g., `async_playwright` module errors).
-- **Interactive Failure Recovery**: The `Orchestrator` uses a non-linear state machine. If a phase fails, it doesn't just crash; it allows the user to jump back to `USER_CONFIG` to change parameters (e.g., switching from Headless to Headed mode) before regenerating.
-- **Secure Credentials via Keyring**: API keys are never stored in plain text configuration files. They are handed off to the system's native secure storage (macOS Keychain, Windows Credential Manager) via the `keyring` library.
-- **No-Null Filtering**: Prompts strictly enforce that generated scripts filter out empty or 'null' rows before saving.
+### 4. Scraper Runtime Contract (SRC) & Dynamic Waiting
+This is the "Missing Piece" that turned ScrapeWizard from a demo into a professional tool.
+- **Dynamic Waiting**: The AI uses `smart_wait(selector)` which automatically handles hydration delays.
+- **Infrastructure Isolation**: The AI never sees Playwright, storage files, or output logic. It only returns data dicts.
+- **Unified Sink**: Data is automatically written to JSON, CSV, and Excel by the runtime.
+- **Self-Healing SDK**: If a selector fails, the `RepairAgent` only has to fix the implementation class, not the browser logic.
 ---
 
 ## 🚀 4. How to Learn from This

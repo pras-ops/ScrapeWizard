@@ -39,16 +39,8 @@ class CodeGenerator:
         has_cookies = (self.project_dir / "cookies.json").exists()
         
         cookies_context = ""
-        if has_storage:
-            cookies_context = """- A 'storage_state.json' file exists. GENERATE CODE TO LOAD THIS STORAGE STATE (cookies + local storage) into the browser context. 
-- IMPORTANT: Use absolute paths in the script so it can be run from any directory. 
-- Use: script_dir = os.path.dirname(os.path.abspath(__file__))
-- Use: storage_path = os.path.join(script_dir, 'storage_state.json')
-- Use: output_dir = os.path.join(script_dir, 'output')
-- Use: context = await browser.new_context(storage_state=storage_path)
-"""
-        elif has_cookies:
-            cookies_context = "- A 'cookies.json' file exists. GENERATE CODE TO LOAD THESE COOKIES into the browser context BEFORE navigating to the target URL. Use absolute paths based on the script directory.\n"
+        if (self.project_dir / "storage_state.json").exists():
+            cookies_context = "- A 'storage_state.json' file exists and will be automatically loaded by the BaseScraper runtime.\n"
         
         # Hostility Override - Make hostility score visible to LLM
         hostility_score = scan_profile.get("hostility_score", 0) if scan_profile else 0
@@ -68,20 +60,43 @@ Behavioral Scan Profile: {json.dumps(scan_profile, indent=2) if scan_profile els
 Interaction: {json.dumps(interaction, indent=2) if interaction else "None"}
 
 {hostility_context}
-
-Generate the full 'generated_scraper.py'.
-IMPORTANT: Output ONLY valid Python code. No explanations, no markdown, no comments before the code.
-The script must:
-1. Save results to 'output/data.json'
-2. Use asyncio and async_playwright
-3. Be immediately runnable and robust to directory changes (use os.path.abspath and base all paths on the script's directory).
-4. If multi-page pagination is requested, implement a robust loop that clicks the 'Next' button or equivalent.
-5. DATA QUALITY (CRITICAL):
-    - Filter out any 'null', empty, or malformed data records.
-    - DEDUPLICATE records based on the primary fields (title/url).
-    - If infinite scroll is used, set a hard limit of 50 interactions or check if node count stops growing.
-6. Respect the 'browser_mode' from run_config. If 'headed', set headless=False.
 {cookies_context}
+
+Generate the 'generated_scraper.py' implementation.
+IMPORTANT: Output ONLY valid Python code. No explanations, no markdown.
+
+REQUIRED STRUCTURE:
+```python
+from scrapewizard_runtime import BaseScraper
+
+class Scraper(BaseScraper):
+    async def navigate(self):
+        # Implementation...
+        pass
+
+    async def get_items(self):
+        # Implementation...
+        return []
+
+    async def parse_item(self, item):
+        # Implementation...
+        return {{}}
+
+if __name__ == "__main__":
+    Scraper(
+        mode="{run_config.get('browser_mode', 'headless')}", 
+        output_format="{run_config.get('format', 'json')}", 
+        pagination_config={json.dumps(run_config.get('pagination_config', {"mode": "first_page", "max_pages": 1}))},
+        pagination_meta={json.dumps(understanding.get("pagination", {}))}
+    ).run()
+```
+
+DATA QUALITY RULES:
+1. Prefer stable CSS selectors over dynamic classes.
+2. Use `await self.runtime.smart_wait(selector)` before querying elements.
+3. If a field is missing, set its value to `None` in the result dictionary.
+4. **CRITICAL**: Only return `None` from `parse_item` if the item is purely decorative or contains NO data fields at all. If any data field is found, return the record.
+5. Ensure the script structure strictly follows the REQUIRED STRUCTURE above.
 """
         
         code = self.client.call(SYSTEM_PROMPT_CODEGEN, user_prompt, json_mode=False)

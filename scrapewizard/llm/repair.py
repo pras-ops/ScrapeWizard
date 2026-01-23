@@ -2,7 +2,7 @@ import re
 import json
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_REPAIR
 from scrapewizard.core.logging import log
@@ -18,7 +18,7 @@ class RepairAgent:
         self.client = LLMClient()
         self.project_dir = Path(project_dir)
 
-    def repair(self, script_path: Path, error_info: str, context: str = "") -> bool:
+    def repair(self, script_path: Path, error_info: str, context: str = "", bad_cols: Optional[List[str]] = None) -> bool:
         """Attempts to repair a failing script using LLM intelligence.
         
         Args:
@@ -44,24 +44,20 @@ class RepairAgent:
         has_cookies = (self.project_dir / "cookies.json").exists()
         
         cookies_context = ""
-        if has_storage:
-            cookies_context = """- A 'storage_state.json' file exists. ENSURE the script loads THIS STORAGE STATE (cookies + local storage) into the browser context. 
-- IMPORTANT: Use absolute paths in the script so it can be run from any directory. 
-- Use: script_dir = os.path.dirname(os.path.abspath(__file__))
-- Use: storage_path = os.path.join(script_dir, 'storage_state.json')
-- Use: output_dir = os.path.join(script_dir, 'output')
-- Use: context = await browser.new_context(storage_state=storage_path)
-"""
-        elif has_cookies:
-            cookies_context = "- A 'cookies.json' file exists. ENSURE the script loads these cookies into the browser context. Use absolute paths based on the script directory.\n"
+        if (self.project_dir / "storage_state.json").exists():
+            cookies_context = "- A 'storage_state.json' file exists and will be automatically loaded by the BaseScraper runtime.\n"
         
+        field_fix_instruction = ""
+        if bad_cols:
+            field_fix_instruction = f"\nCRITICAL: The following fields are returning NO DATA. Focus on fixing their selectors: {', '.join(bad_cols)}\n"
+
         user_prompt = f"""
-Current Script:
+Current Plugin Code:
 {current_code}
 
 Error Message:
 {error_info}
-
+{field_fix_instruction}
 {context if context else ""}
 
 === PROJECT CONTEXT ===
@@ -76,16 +72,14 @@ Run Config (user selections):
 {json.dumps(run_config, indent=2) if run_config else "Not available"}
 
 === INSTRUCTIONS ===
-Fix the script. Output ONLY Python code. No explanations, no markdown.
-Ensure:
-1. Save results to 'output/data.json' using json.dump
-2. Create output dir: os.makedirs('output', exist_ok=True)
-3. Use proper async/await syntax
-4. Use the correct CSS selectors from the analysis snapshot
-5. Valid Python that runs immediately and is robust to directory changes (use os.path.abspath and base all paths on the script's directory).
-6. Fix any pagination logic to ensure it actually clicks 'Next' if multi-page is required.
-7. Filter out any 'null' or empty data records before appending to the results list.
+Fix the plugin. Output ONLY Python code. No explanations, no markdown.
+Ensure the plugin subclasses `BaseScraper` and implements the required methods correctly.
+Use `await self.runtime.smart_wait()` if elements are missing or not loaded.
 {cookies_context}
+
+CRITICAL: The script MUST end with this exact block (with values filled):
+if __name__ == "__main__":
+    Scraper(mode="...", output_format="...", pagination_config={{...}}, pagination_meta={{...}}).run()
 """
         
         new_code = self.client.call(SYSTEM_PROMPT_REPAIR, user_prompt, json_mode=False)

@@ -70,6 +70,9 @@ class LLMClient:
         except Exception as e:
             if "AuthenticationError" in type(e).__name__:
                 log(f"Authentication failed for {self.provider} ({self.model}). Please check your API key with 'scrapewizard auth <key>'.", level="error")
+            elif "BadRequestError" in type(e).__name__ and json_mode:
+                log(f"LLM Provider {self.provider} doesn't support JSON mode. Retrying as plain text...", level="warning")
+                return self.call(system_prompt, user_prompt, json_mode=False)
             else:
                 log(f"LLM Call failed ({self.model}): {type(e).__name__}: {e}", level="error")
             raise
@@ -137,6 +140,7 @@ class LLMClient:
         code = code.strip()
         
         # Post-extraction fixes for common LLM hallucinations
+        code = re.sub(r'from\s+scrapewizard\.runtime\b', 'from scrapewizard_runtime', code, flags=re.IGNORECASE)
         code = re.sub(r'\bfrom\s+async_playwright\.async_api\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bfrom\s+async_playwright\b', 'from playwright.async_api', code, flags=re.IGNORECASE)
         code = re.sub(r'\bimport\s+async_playwright\b', 'from playwright.async_api import async_playwright', code, flags=re.IGNORECASE)

@@ -65,7 +65,7 @@ class RepairLoop:
             
             # Call repair
             try:
-                self.agent.repair(script_path, output, context=context)
+                self.agent.repair(script_path, output, context=context, bad_cols=column_hints)
             except Exception as e:
                 import traceback
                 log(f"Repair agent failed: {e}", level="error")

@@ -14,7 +14,8 @@ def scrape(
     headless: bool = typer.Option(True, help="Run browser in headless mode"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     ci: bool = typer.Option(False, "--ci", help="Run in non-interactive CI mode (auto-accept defaults)"),
-    expert: bool = typer.Option(False, "--expert", help="Expert mode - show all technical details"),
+    expert: bool = typer.Option(False, "--expert", help="Expert mode - show all technical details (full manual control)"),
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="Interactive mode - enabling smart questions (defaults to Zero-Click)"),
     guided_tour: bool = typer.Option(False, "--guided-tour", help="Guided tour mode - step-by-step narration")
 ):
     """
@@ -26,7 +27,7 @@ def scrape(
         raise typer.Exit(code=1)
 
     # Setup logging
-    # Wizard mode is default (unless expert or ci flag)
+    # Wizard mode is default (Zero-Click), unless expert or ci flag
     wizard_mode = not expert and not ci
 
     if guided_tour:
@@ -61,7 +62,7 @@ def scrape(
             log(f"Project directory: {project_dir}")
 
         # Start Orchestrator
-        orchestrator = Orchestrator(project_dir, ci_mode=ci, wizard_mode=wizard_mode, guided_tour=guided_tour)
+        orchestrator = Orchestrator(project_dir, ci_mode=ci, wizard_mode=wizard_mode, guided_tour=guided_tour, interactive_mode=interactive)
         orchestrator.run()
         
     except KeyboardInterrupt:

@@ -86,16 +86,50 @@ class UI:
         return {"username": username, "password": password}
 
     @staticmethod
-    def ask_fields_wizard(available_fields: List[Dict[str, Any]], suggested_fields: List[Dict[str, Any]]) -> List[str]:
-        """Wizard mode: Simple Y/n for suggested fields, or Edit."""
+    def show_smart_preview(data: List[Dict[str, Any]]) -> bool:
+        """
+        Consolidated preview for Zero-Click mode.
+        Shows the table and a brief summary.
+        Returns: True if critical issues were found, False otherwise.
+        """
+        if not data:
+            console.print("[yellow]⚠️  No data extracted during test run.[/yellow]")
+            return True
+
+        # Show table
+        UI.show_data_preview(data, max_rows=5)
+        
+        # Check for quality issues
+        columns = list(data[0].keys())
+        null_counts = {col: sum(1 for row in data if not row.get(col)) for col in columns}
+        bad_cols = [col for col, count in null_counts.items() if count > len(data) * 0.8] # >80% null
+        
+        if bad_cols:
+            console.print(f"\n[bold yellow]⚠️  Warning: High missing data in columns: {', '.join(bad_cols)}[/bold yellow]")
+            return True
+            
+        return False
+        
+
+    @staticmethod
+    def ask_fields_wizard(available_fields: List[Dict[str, Any]], suggested_fields: List[Dict[str, Any]], interactive: bool = False) -> List[str]:
+        """
+        Wizard mode.
+        - Zero-Click (default): Auto-accept suggestions.
+        - Interactive: Ask user.
+        """
         suggested_names = [f["name"] for f in suggested_fields]
         
         if not suggested_fields:
-            console.print("\n[yellow]⚠️  I couldn't find a clear repeating data pattern automatically.[/yellow]")
+            console.print("\n[yellow]⚠️  No clear repeating patterns found. Switching to manual selection.[/yellow]")
             return UI.ask_fields(available_fields)
 
-        console.print(f"\n[bold green]Recommended Fields:[/bold green] {', '.join(suggested_names)}")
+        console.print(f"\n[green]✓ Found {len(suggested_names)} data fields:[/green] {', '.join(suggested_names)}")
         
+        if not interactive:
+            return suggested_names
+        
+        # Interactive mode only
         choice = inquirer.select(
             message="Use these suggested fields?",
             choices=[
@@ -109,9 +143,8 @@ class UI:
         if choice == "yes":
             return suggested_names
         elif choice == "retry":
-            return "retry" # Signal to orchestrator
+            return "retry"
         
-        # If no, fall back to manual selection
         return UI.ask_fields(available_fields)
 
     @staticmethod
@@ -190,14 +223,21 @@ class UI:
         ).execute()
 
     @staticmethod
-    async def wait_for_solve(reason: str = "A CAPTCHA or blocking screen was detected.") -> bool:
-        """Pause execution and let user solve a blocker in the headed browser."""
-        console.print(f"\n[bold red]🛑 ACTION REQUIRED: {reason}[/bold red]")
-        console.print("[yellow]Please solve the CAPTCHA or bypass the blocker in the browser window.[/yellow]")
-        console.print("[dim]- ScrapeWizard is waiting for you...[/dim]")
+    async def wait_for_solve(reason: str = "") -> bool:
+        """Pause execution for Page Verification."""
+        console.print(f"\n[bold yellow]⚠️  Page Verification Required[/bold yellow]")
+        console.print("[white]ScrapeWizard has reached a page and needs your confirmation before continuing.[/white]")
+        console.print("\n[dim]Please check the browser window and confirm:[/dim]")
+        console.print("  1. Is this the [bold]correct page[/bold] with the data you want?")
+        console.print("  2. Does it match your requirements (table, list, profile, etc.)?")
+        console.print("\n[yellow]If YES:[/yellow] Type [bold green]Y[/bold green] to continue.")
+        console.print("[yellow]If NO (Blocker/Wrong Page):[/yellow]")
+        console.print("  • Solve any CAPTCHA/Login/Popup in the browser.")
+        console.print("  • Navigate to the correct page if needed.")
+        console.print("  • Then return here and type [bold green]Y[/bold green].")
         
         return await inquirer.confirm(
-            message="Have you solved the blocker and reached the data?",
+            message="Ready to scrape this view?",
             default=True
         ).execute_async()
 
@@ -267,8 +307,9 @@ class UI:
             message="How does the data look?",
             choices=[
                 Choice("approve", "✅ Looks good - proceed with full scraping"),
-                Choice("fix_columns", "🔧 Some columns need fixing - let me select"),
-                Choice("retry", "🔄 Re-generate the scraper from scratch"),
+                Choice("fix_columns", "🩺 Auto-fix: Let AI repair specific columns"),
+                Choice("guided", "🖐️  Manual: Re-run in Guided Mode (Fix in browser)"),
+                Choice("retry", "🔄 Re-generate everything (Full retry)"),
                 Choice("abort", "❌ Cancel and exit")
             ]
         ).execute()

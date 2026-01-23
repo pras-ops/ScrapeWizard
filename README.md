@@ -12,10 +12,11 @@ ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropi
 - **Behavioral Analysis**: Measures DOM stability, mutations, and network activity (XHR/API) during recon
 - **Unified Guided Access**: Seamlessly handles Login, CAPTCHAs, and complex navigation (e.g. Amazon Search) via a "Guided" headed browser session
 - **Bot Defense Scanner**: Automatically detects hostile anti-bot systems (Akamai, DataDome, PerimeterX) and forces "Guided Mode" to ensure success
-- **Earned Headless Mode**: Automatically recommends "Guided" mode for complex SPAs, ensuring session stability before attempting headless execution
+- **Scraper Runtime Contract (SRC)**: AI implementation of specific classes only. Infrastructure (Browser, Storage, I/O) is owned by the ScrapeWizard SDK, eliminating hallucinations.
+- **Dynamic Waiting**: Automatic handling of hydration delays via `smart_wait()`.
 - **Session Persistence (Storage State)**: Captures cookies, LocalStorage, and SessionStorage to bypass complex auth (JWT/Tokens) autonomously in future runs
-- **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust code
-- **Offline First & Portable**: Generated scrapers use absolute path discovery, ensuring they run from any directory without AI dependency
+- **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust plugin code
+- **Offline First & Portable**: Generated plugins run via the bundled `scrapewizard_runtime`, ensuring they work from any directory with full logging.
 - [/] **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration
 - [/] **Interactive Recovery**: Never get stuck. If a script fails, ScrapeWizard offers Auto-Repair, Manual Editing, or a return to configuration settings.
 - [/] **Expert Mode**: Full technical output via `--expert` flag for power users and debugging
@@ -44,23 +45,29 @@ python -m scrapewizard.cli.main setup
 ### 2. `scrape` - Build a Scraper
 The main command to start a new scraping project.
 
-**Wizard Mode (Default - Simple & Friendly):**
+**Zero-Click Mode (Default - "Just Works"):**
 ```bash
-# Just provide the URL - ScrapeWizard handles the rest
+# Just provide the URL - ScrapeWizard handles fields, pagination, and format automatically
 python -m scrapewizard.cli.main scrape --url "https://www.amazon.in/s?k=phones"
 
-# What you see: Clean, emoji-driven progress
+# What you see:
 # 🧙 ScrapeWizard
-# Opening the website…
-# Checking the website…
-# [Interactive prompts if needed]
-# 🧠 Understanding this page…
+# ...
+# ✓ Found 5 data fields: title, price, rating, reviews, image
+# 📊 Data Preview: [Table]
+# ⚡ Scraped 31 items → Saved to data.xlsx
 # ✅ Done!
+```
+
+**Interactive Mode (Custom Control):**
+```bash
+# Ask me "One Smart Question" about fields or format
+python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com" --interactive
 ```
 
 **Expert Mode (Full Technical Output):**
 ```bash
-# Shows debug logs, state transitions, LLM warnings, repair loops
+# Shows debug logs, state transitions, LLM warnings, repair loops, and full manual control
 python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com" --expert
 ```
 
@@ -106,7 +113,7 @@ python -m scrapewizard.cli.main --version
 
 Projects are saved in `~/scrapewizard_projects/`.
 Each project contains a self-contained `output/` folder:
-- `generated_scraper.py`: The standalone Python Playwright script (portable).
+- `generated_scraper.py`: The ScrapeWizard Scraper Plugin (subclasses `BaseScraper`).
 - `storage_state.json`: Full session state (Cookies + LocalStorage) for manual bypass/login.
 - `data.json` / `data.csv` / `data.xlsx`: Your scraped records (cleaned and filtered).
 - `analysis_snapshot.json`: The raw DOM analysis used by the AI.
