@@ -37,4 +37,4 @@ scrapewizard = "scrapewizard.cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scrapewizard*"]
+include = ["scrapewizard*", "scrapewizard_runtime*"]
