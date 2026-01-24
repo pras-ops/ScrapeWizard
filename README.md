@@ -4,22 +4,18 @@
 
 ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropic, etc.). It analyzes websites, understands the structure, and generates robust Playwright scrapers that run locally.
 
-## Features
-
-- **🧙 Wizard Mode (Default)**: Simple, friendly interface for non-technical users - just give it a URL and get data
-- **Stealth Probe Pre-Scan**: Brief headed browser probe (3-5s) to trigger real bot defenses before asking user about access mode
-- **Sign-In Detection**: Automatically detects authentication requirements (login buttons, auth prompts) and forces Guided mode for auth-heavy platforms (Amazon, LinkedIn, Facebook, Twitter)
-- **Behavioral Analysis**: Measures DOM stability, mutations, and network activity (XHR/API) during recon
-- **Unified Guided Access**: Seamlessly handles Login, CAPTCHAs, and complex navigation (e.g. Amazon Search) via a "Guided" headed browser session
-- **Bot Defense Scanner**: Automatically detects hostile anti-bot systems (Akamai, DataDome, PerimeterX) and forces "Guided Mode" to ensure success
-- **Scraper Runtime Contract (SRC)**: AI implementation of specific classes only. Infrastructure (Browser, Storage, I/O) is owned by the ScrapeWizard SDK, eliminating hallucinations.
+- **🧙 Wizard Mode (Default)**: Simple, "Zero-Click" intelligent agent - just give it a URL and get clean data.
+- **Unified Decision Gates (v1.1)**: Critical checkpoints where the user owns the "WHAT" while the AI handles the "HOW":
+    - **Gate 1: Output Format**: Choose CSV, Excel, or JSON upfront.
+    - **Gate 2: Pagination Scope**: Define scrape depth (Single page, 5-page limit, or all pages).
+    - **Gate 3: Data Quality Firewall**: Monitors extraction results; if missing data is detected, it triggers a recovery loop.
+- **Interactive Recovery**: Never get stuck. If a run fails, choose:
+    - 🩺 **Auto-Repair**: AI fixes specific selectors for missing fields.
+    - 🖐️ **Guided Mode**: Re-run with a visible browser for manual corrections.
+    - 🔄 **Full Retry**: Re-generate the entire strategy from scratch.
+- **Scraper Runtime Contract (SRC)**: AI implementation of specific classes only. Infrastructure (Browser, Pagination loop, I/O) is owned by the ScrapeWizard SDK, eliminating hallucinations.
 - **Dynamic Waiting**: Automatic handling of hydration delays via `smart_wait()`.
-- **Session Persistence (Storage State)**: Captures cookies, LocalStorage, and SessionStorage to bypass complex auth (JWT/Tokens) autonomously in future runs
-- **Agentic Builder**: Uses LLM to understand complex DOM structures and write robust plugin code
-- **Offline First & Portable**: Generated plugins run via the bundled `scrapewizard_runtime`, ensuring they work from any directory with full logging.
-- [/] **CI/CD Ready**: Non-interactive mode via `--ci` flag for pipeline integration
-- [/] **Interactive Recovery**: Never get stuck. If a script fails, ScrapeWizard offers Auto-Repair, Manual Editing, or a return to configuration settings.
-- [/] **Expert Mode**: Full technical output via `--expert` flag for power users and debugging
+- **Hardening & Portability**: Content-based hashing for deduplication and detailed debug logs indicating exactly why any items were skipped.
 
 ## Installation
 
@@ -47,14 +43,15 @@ The main command to start a new scraping project.
 
 **Zero-Click Mode (Default - "Just Works"):**
 ```bash
-# Just provide the URL - ScrapeWizard handles fields, pagination, and format automatically
+# Provide URL - ScrapeWizard guides you through simplified format and pagination gates
 python -m scrapewizard.cli.main scrape --url "https://www.amazon.in/s?k=phones"
 
-# What you see:
-# 🧙 ScrapeWizard
+# Interaction Flow:
+# ? Output Format: Excel
+# ? Pagination Strategy: Limit to 5 Pages
 # ...
-# ✓ Found 5 data fields: title, price, rating, reviews, image
-# 📊 Data Preview: [Table]
+# ✓ Found 5 data fields: title, price, image...
+# 🩺 Quality Check: Success!
 # ⚡ Scraped 31 items → Saved to data.xlsx
 # ✅ Done!
 ```

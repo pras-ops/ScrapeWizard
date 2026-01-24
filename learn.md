@@ -20,12 +20,16 @@ The project follows a **Modular State Machine** architecture. Each step of the p
 3.  **RECON**: Playwright opens the site, performs a **Behavioral Scan** (stability, mutations, scroll dependency), and extracts a snapshot.
 4.  **INTERACTIVE_SOLVE**: If a CAPTCHA is detected, the system pauses for manual human bypass and captures session cookies.
 5.  **LLM_ANALYSIS**: AI looks at the DOM AND the Scan Profile to see if it's scrapable.
-6.  **USER_CONFIG**: User selects fields (Title, Price, etc.) and confirms the **Adaptive Browser Mode**.
+6.  **USER_CONFIG (Decision Gates 1 & 2)**: 
+    - **Gate 1**: User selects output format (CSV, XLSX, JSON).
+    - **Gate 2**: User defines pagination scope (e.g., Limit to 5 pages).
 7.  **CODEGEN**: AI implementation of the **Scraper Runtime Contract (SRC)**. It subclasses `BaseScraper` from `scrapewizard_runtime`.
-8.  **TEST & REPAIR**: The script runs. If it fails, the user is offered a **UX Firewall Choice**: Auto-Repair, Manual Edit, or Return to Config.
-9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Contract** fixes and selector adjustments using the SRC rules.
-10. **HARDENING**: The runtime automatically handles absolute path discovery (`os.path.abspath`) and output management.
-11. **FINAL_RUN**: The polished plugin runs via the ScrapeWizard SDK and saves cleaned data (JSON, CSV, Excel).
+8.  **TEST & REPAIR (Gate 3 - Quality Firewall)**: 
+    - The script runs. If it fails or produces >80% missing data, the **Quality Firewall** pauses execution.
+    - Options: 🩺 **Auto-Repair**, 🖐️ **Re-guided Access**, or 🔄 **Configuration Change**.
+9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Contract** fixes with column-specific hints.
+10. **HARDENING (Phase 6)**: The runtime enforces content-based hashing for robust deduplication and structural guardrails for LLM-generated entry points.
+11. **FINAL_RUN**: The polished plugin runs via the ScrapeWizard SDK, managing the pagination loop and multi-format saving automatically.
 
 ---
 
@@ -48,7 +52,9 @@ The Scan Profile provides insights into: DOM stability, mutations, scroll depend
 
 ### Agent B: The Plugin Developer (CodeGenerator)
 **Goal**: Write a scraper implementation using the ScrapeWizard SDK.
-**The Scraper Runtime Contract (SRC)**: We forbid the AI from touching infrastructure (Playwright setup, files, retries). It only implements page logic.
+**The Scraper Runtime Contract (SRC)**: We forbid the AI from touching infrastructure (Playwright setup, files, retries, pagination loops).
+- **AI owns selection**: The LLM writes logic to find the "Next" button and extract fields.
+- **SDK owns execution**: The `BaseScraper` handles clicking the "Next" button, page counters, and saving formatted data.
 
 **The Prompt**:
 ```python
@@ -57,6 +63,7 @@ You MUST:
 - Subclass `BaseScraper`
 - Implement `navigate()`, `get_items()`, and `parse_item()`
 - Use `await self.runtime.smart_wait()` for dynamic stability.
+- **CRITICAL**: Maintain the `if __name__ == "__main__":` entry point.
 """
 ```
 
@@ -97,12 +104,17 @@ Instead of just grabbing the HTML, we "observe" the page and its traffic.
 ### 3. DOM Analysis 2.0 (Scoring & Filtering)
 We don't just find all repeating classes. We score them based on "Richness" (how many child fields they have). This ensures we pick the main product list instead of the footer links.
 
-### 4. Scraper Runtime Contract (SRC) & Dynamic Waiting
-This is the "Missing Piece" that turned ScrapeWizard from a demo into a professional tool.
+### 4. Scraper Runtime Contract (SRC) & Hardening
+This is the "Execution Protection" layer that ensures AI-generated code is robust and manageable.
 - **Dynamic Waiting**: The AI uses `smart_wait(selector)` which automatically handles hydration delays.
 - **Infrastructure Isolation**: The AI never sees Playwright, storage files, or output logic. It only returns data dicts.
-- **Unified Sink**: Data is automatically written to JSON, CSV, and Excel by the runtime.
-- **Self-Healing SDK**: If a selector fails, the `RepairAgent` only has to fix the implementation class, not the browser logic.
+- **Robust Deduplication (Phase 6)**: Instead of assuming the first column is a unique ID, the runtime hashes the entire row content.
+- **Structural Enforcement**: Repair and CodeGen agents are strictly instructed to preserve the execution block, preventing corrupted scripts during self-healing.
+- **Unified Sink**: Data is automatically written to JSON, CSV, and Excel by the runtime based on user configuration.
+
+### 5. UX Philosophy: The Firewall
+"SRC owns HOW. Orchestrator owns WHEN. User owns WHAT."
+By re-introducing decision gates, we ensure the user is always in the loop for high-value decisions (format, depth, quality) while the autonomous agents handle the low-value toil (selectors, waiting, I/O).
 ---
 
 ## 🚀 4. How to Learn from This
