@@ -65,10 +65,14 @@ DYNAMIC WAITING & LOADING:
 - Use `await self.runtime.smart_wait("selector")` to ensure elements are loaded before interaction.
 - If the page uses lazy loading or infinite scroll, use `await self.runtime.scroll_down(times=N)` to trigger content loading.
 
-DATA QUALITY (CRITICAL):
-- Ensure `get_items` returns ALL items, not just the first one.
-- Filter out 'null' or empty records in `parse_item`. 
-- If a primary field like 'title' is missing, try an alternative selector.
+DATA QUALITY & ASYNC RULES (CRITICAL):
+1. **AWAIT EVERYTHING**: Methods like `inner_text()`, `get_attribute()`, and `query_selector()` ARE ASYNC. You MUST `await` them.
+2. **NO SUBSCRIPTING COROUTINES**: You cannot use `[]` on a method call without awaiting it first. 
+   - BAD: `item.inner_text()[0]`
+   - GOOD: `(await item.inner_text())[0]`
+3. **NO DICT-LIKE ELEMENTS**: Playwright elements are NOT dictionaries. Use `.get_attribute("name")`, not `element["name"]`.
+4. Ensure `get_items` returns ALL items, not just the first one.
+5. Only return `None` from `parse_item` if the item is purely decorative or invalid. Return partial data if some fields are missing.
 
 Start your response directly with the class definition or necessary imports - no other text.
 """

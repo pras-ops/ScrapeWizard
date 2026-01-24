@@ -50,6 +50,9 @@ class LLMClient:
         # Security redaction
         clean_user = SecurityManager.redact_text(user_prompt)
         
+        # Determine if we should attempt JSON mode
+        use_json_mode = json_mode and self.provider in ["openai", "openrouter", "local"]
+        
         kwargs = {
             "model": self.model,
             "messages": [
@@ -59,57 +62,71 @@ class LLMClient:
             "temperature": 0.1,
         }
         
-        if json_mode and self.provider in ["openai", "openrouter", "local"]:
+        if use_json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
         try:
-            import openai
             response = self.client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content
+            if not content:
+                log("LLM returned empty content.", level="warning")
+                return "{}" if json_mode else ""
             return content
         except Exception as e:
-            if "AuthenticationError" in type(e).__name__:
-                log(f"Authentication failed for {self.provider} ({self.model}). Please check your API key with 'scrapewizard auth <key>'.", level="error")
-            elif "BadRequestError" in type(e).__name__ and json_mode:
-                log(f"LLM Provider {self.provider} doesn't support JSON mode. Retrying as plain text...", level="warning")
+            error_msg = str(e).lower()
+            # Broad check for JSON mode rejection (OpenRouter, older models, etc.)
+            is_bad_request = "badrequesterror" in type(e).__name__.lower() or "400" in error_msg
+            is_json_mode_error = "response_format" in error_msg or "json_object" in error_msg
+            
+            if "authenticationerror" in type(e).__name__.lower():
+                log(f"Authentication failed for {self.provider} ({self.model}). Check API key.", level="error")
+            elif (is_bad_request or is_json_mode_error) and json_mode:
+                log(f"LLM Provider {self.provider} rejected JSON mode. Retrying as plain text...", level="warning")
                 return self.call(system_prompt, user_prompt, json_mode=False)
             else:
                 log(f"LLM Call failed ({self.model}): {type(e).__name__}: {e}", level="error")
             raise
 
     def parse_json(self, content: str) -> Dict[str, Any]:
-        """Clean and parse JSON from LLM response with robustness."""
+        """Clean and parse JSON from LLM response with deep robustness."""
+        if not content or not isinstance(content, str):
+            return {}
+            
         try:
-            # 1. Clean whitespace and non-printable chars
+            # 1. Clean whitespace
             cleaned = content.strip()
             
-            # 2. Strip Markdown code blocks if present
-            if cleaned.startswith("```"):
-                # Use regex to extract content from the first code block
-                import re
-                match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned)
-                if match:
-                    cleaned = match.group(1).strip()
+            # 2. Extract from markdown fences if present
+            import re
+            fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, re.IGNORECASE)
+            if fence_match:
+                cleaned = fence_match.group(1).strip()
             
-            # 3. Find first { and last } to isolate JSON object
+            # 3. Aggressive isolation: Find FIRST { and LAST }
             start = cleaned.find("{")
             end = cleaned.rfind("}")
+            
             if start != -1 and end != -1:
-                cleaned = cleaned[start:end+1]
+                json_candidate = cleaned[start:end+1]
+                try:
+                    return json.loads(json_candidate)
+                except json.JSONDecodeError:
+                    # If direct slice failed, try finding balanced braces (harder)
+                    # For now just log and move to step 4
+                    pass
+            
+            # 4. Fallback: direct parse (maybe it's already pure JSON)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
                 
-            if not cleaned:
-                return {}
-                
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            import traceback
-            log(f"Failed to parse LLM JSON: {e}", level="error")
-            log(f"Raw Content: {content[:200]}...", level="debug")
-            log(f"Cleaned Content: {cleaned[:200]}...", level="debug")
-            log(f"Parse Traceback: {traceback.format_exc()}", level="debug")
+            # 5. Last resort: If we're here, we failed to find valid JSON
+            log(f"Final fallback failed to parse JSON from: {content[:100]}...", level="debug")
             return {}
+            
         except Exception as e:
-            log(f"Unexpected error parsing LLM JSON: {e}", level="error")
+            log(f"Critical error in parse_json: {e}", level="error")
             return {}
 
     @staticmethod

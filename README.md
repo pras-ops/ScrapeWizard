@@ -22,6 +22,9 @@ ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropi
 ```bash
 pip install -r requirements.txt
 playwright install chromium
+
+# Linux Only: Install system dependencies
+playwright install-deps
 ```
 
 ## Commands & Examples

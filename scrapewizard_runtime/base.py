@@ -58,13 +58,24 @@ class BaseScraper(ABC):
         for i, item in enumerate(items):
             try:
                 data = await self.parse_item(item)
+                
+                # Runtime Type Check
+                if data is not None and not isinstance(data, dict):
+                    print(f"  [Error] Item {i}: Scraper returned {type(data).__name__} instead of a dictionary. This usually means an 'await' was missed.")
+                    continue
+
                 if data and any(val is not None for val in data.values()):
                     page_results.append(data)
                 else:
                     if i < 5: # Only log first 5 to avoid spam
                         print(f"  [Debug] Item {i} returned no valid data fields.")
             except Exception as e:
-                print(f"Error parsing item {i}: {e}")
+                # Catch subscripting errors on coroutines specifically for better UX
+                err_msg = str(e)
+                if "coroutine" in err_msg and "subscriptable" in err_msg:
+                    print(f"  [Critical] Item {i} failed: {err_msg}. The AI generated code that missed an 'await' before a subscript access.")
+                else:
+                    print(f"  [Error] Parsing item {i}: {e}")
         
         print(f"Extracted {len(page_results)} valid records from this page.")
         self.results.extend(page_results)

@@ -21,6 +21,14 @@ class ScriptTester:
             log(f"Running execution: {script_path.name} (timeout: {timeout}s)")
         
         try:
+            # Cleanup stale output to prevent false positives
+            output_file = cwd / "output" / "data.json"
+            if output_file.exists():
+                try:
+                    os.remove(output_file)
+                except Exception:
+                    pass
+
             # Ensure scrapewizard_runtime is in PYTHONPATH
             # It's located in the workspace root
             workspace_root = Path(__file__).parent.parent.parent

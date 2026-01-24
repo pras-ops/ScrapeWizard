@@ -82,8 +82,12 @@ def doctor() -> None:
     config_ok = ConfigManager.check_setup()
     rprint(f"• Configuration: {'[green]OK[/green]' if config_ok else '[red]MISSING (Run setup)[/red]'}")
     
-    playwright = shutil.which("playwright")
-    rprint(f"• Playwright CLI: {'[green]OK[/green]' if playwright else '[red]MISSING[/red]'}")
+    playwright_path = shutil.which("playwright")
+    rprint(f"• Playwright CLI: {'[green]OK[/green]' if playwright_path else '[red]MISSING[/red]'}")
+    
+    # Linux-specific check for dependencies
+    if platform.system() == "Linux" and playwright_path:
+        rprint("  [dim]Note: On Linux, ensure system dependencies are installed: [bold]playwright install-deps[/bold][/dim]")
     
     projects_dir = ProjectManager.PROJECTS_ROOT
     rprint(f"• Projects Directory: {projects_dir} ({'[green]Ready[/green]' if projects_dir.exists() else '[yellow]Not initialized[/yellow]'})")
@@ -93,8 +97,7 @@ def doctor() -> None:
         try:
             from scrapewizard.llm.client import LLMClient
             client = LLMClient()
-            # Simple check or just mention it
-            rprint("• LLM Client: [green]Initialized[/green]")
+            rprint(f"• LLM Client: [green]Initialized[/green] ({client.provider}/{client.model})")
         except Exception as e:
             rprint(f"• LLM Client: [red]Error ({e})[/red]")
     

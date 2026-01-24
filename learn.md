@@ -105,12 +105,13 @@ Instead of just grabbing the HTML, we "observe" the page and its traffic.
 We don't just find all repeating classes. We score them based on "Richness" (how many child fields they have). This ensures we pick the main product list instead of the footer links.
 
 ### 4. Scraper Runtime Contract (SRC) & Hardening
-This is the "Execution Protection" layer that ensures AI-generated code is robust and manageable.
+This is the "Execution Protection" layer that ensures AI-generated code is robust and manageable across **Windows, macOS, and Linux**.
 - **Dynamic Waiting**: The AI uses `smart_wait(selector)` which automatically handles hydration delays.
 - **Infrastructure Isolation**: The AI never sees Playwright, storage files, or output logic. It only returns data dicts.
 - **Robust Deduplication (Phase 6)**: Instead of assuming the first column is a unique ID, the runtime hashes the entire row content.
 - **Structural Enforcement**: Repair and CodeGen agents are strictly instructed to preserve the execution block, preventing corrupted scripts during self-healing.
 - **Unified Sink**: Data is automatically written to JSON, CSV, and Excel by the runtime based on user configuration.
+- **OS Agnostic Paths**: All filesystem operations use `pathlib` and absolute path discovery, ensuring scripts run identically on any operating system.
 
 ### 5. UX Philosophy: The Firewall
 "SRC owns HOW. Orchestrator owns WHEN. User owns WHAT."

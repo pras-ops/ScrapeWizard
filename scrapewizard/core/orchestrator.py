@@ -763,8 +763,8 @@ class Orchestrator:
                     self._transition_to(State.FAILED)
                 elif action == "retry":
                     if not self.wizard_mode:
-                        log("User requested regeneration.")
-                    self._transition_to(State.CODEGEN)
+                        log("User requested re-configuration.")
+                    self._transition_to(State.USER_CONFIG)
                 else:
                     if not self.wizard_mode:
                         log("User aborted.")
