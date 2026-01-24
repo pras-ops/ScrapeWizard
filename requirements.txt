@@ -12,3 +12,4 @@ prompt_toolkit>=3.0.0
 keyring>=24.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
+python-json-logger>=2.0.0

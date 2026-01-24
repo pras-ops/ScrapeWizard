@@ -1,7 +1,7 @@
 import asyncio
 import json
 import csv
-import os
+from pathlib import Path
 from typing import List, Dict
 from playwright.async_api import async_playwright
 
@@ -25,8 +25,9 @@ class Scraper:
             )
             
             # Load cookies if available
-            if os.path.exists("cookies.json"):
-                with open("cookies.json", "r") as f:
+            cookies_path = Path("cookies.json")
+            if cookies_path.exists():
+                with open(cookies_path, "r") as f:
                     cookies = json.load(f)
                     await context.add_cookies(cookies)
             
@@ -61,10 +62,12 @@ class Scraper:
             break # Safety break for template
 
     def save_data(self):
-        os.makedirs(ScraperConfig.OUTPUT_DIR, exist_ok=True)
+        output_dir = Path(ScraperConfig.OUTPUT_DIR)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # JSON output
-        with open(f"{ScraperConfig.OUTPUT_DIR}/data.json", "w", encoding='utf-8') as f:
+        output_file = output_dir / "data.json"
+        with open(output_file, "w", encoding='utf-8') as f:
             json.dump(self.data, f, indent=2)
             
         print(f"Saved {len(self.data)} items.")

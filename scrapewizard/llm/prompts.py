@@ -65,14 +65,34 @@ DYNAMIC WAITING & LOADING:
 - Use `await self.runtime.smart_wait("selector")` to ensure elements are loaded before interaction.
 - If the page uses lazy loading or infinite scroll, use `await self.runtime.scroll_down(times=N)` to trigger content loading.
 
-DATA QUALITY & ASYNC RULES (CRITICAL):
-1. **AWAIT EVERYTHING**: Methods like `inner_text()`, `get_attribute()`, and `query_selector()` ARE ASYNC. You MUST `await` them.
-2. **NO SUBSCRIPTING COROUTINES**: You cannot use `[]` on a method call without awaiting it first. 
+DATA EXTRACTION BEST PRACTICES (CRITICAL):
+1. **CHECK ATTRIBUTES FIRST**: For links and images, the most complete data is often in attributes:
+   - For titles on links: Try `get_attribute("title")` first, then fall back to `inner_text()`
+   - For images: Use `get_attribute("alt")` for alt text, `get_attribute("src")` for URLs
+   - For links: Use `get_attribute("href")` for URLs
+   
+2. **AWAIT EVERYTHING**: Methods like `inner_text()`, `get_attribute()`, and `query_selector()` ARE ASYNC. You MUST `await` them.
+
+3. **NO SUBSCRIPTING COROUTINES**: You cannot use `[]` on a method call without awaiting it first. 
    - BAD: `item.inner_text()[0]`
    - GOOD: `(await item.inner_text())[0]`
-3. **NO DICT-LIKE ELEMENTS**: Playwright elements are NOT dictionaries. Use `.get_attribute("name")`, not `element["name"]`.
-4. Ensure `get_items` returns ALL items, not just the first one.
-5. Only return `None` from `parse_item` if the item is purely decorative or invalid. Return partial data if some fields are missing.
+   
+4. **NO DICT-LIKE ELEMENTS**: Playwright elements are NOT dictionaries. Use `.get_attribute("name")`, not `element["name"]`.
+
+5. **SMART FALLBACKS**: Use this pattern for robust extraction:
+   ```python
+   # For titles (check title attribute first):
+   title = await element.get_attribute("title") if element else None
+   if not title:
+       title = await element.inner_text() if element else None
+   
+   # For images:
+   img_src = await img.get_attribute("src") if img else None
+   ```
+
+6. Ensure `get_items` returns ALL items, not just the first one.
+
+7. Only return `None` from `parse_item` if the item is purely decorative or invalid. Return partial data if some fields are missing.
 
 Start your response directly with the class definition or necessary imports - no other text.
 """

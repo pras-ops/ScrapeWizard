@@ -1,60 +1,276 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Scraping Report - {{ meta.url }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScrapeWizard | Intelligent Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: sans-serif; padding: 20px; color: #333; }
-        .header { background: #f4f4f4; padding: 20px; border-radius: 8px; }
-        .stats { display: flex; gap: 20px; margin-top: 20px; }
-        .stat-box { background: #e9ecef; padding: 15px; border-radius: 5px; flex: 1; text-align: center; }
-        .stat-value { font-size: 24px; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background: #007bff; color: white; }
+        :root {
+            --bg-dark: #0a0b1e;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent-cyan: #00f2fe;
+            --accent-violet: #6a11cb;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0d1;
+            --success: #00ff88;
+            --error: #ff4b2b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 20% 20%, rgba(106, 17, 203, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(0, 242, 254, 0.15) 0%, transparent 40%);
+            font-family: 'Inter', sans-serif;
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+
+        h1, h2, h3, .stat-value { font-family: 'Outfit', sans-serif; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        .brand-logo {
+            font-size: 1.8rem;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--accent-cyan), var(--accent-violet));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        .meta-info {
+            text-align: right;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .url-chip {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 1rem;
+            border-radius: 50px;
+            color: var(--accent-cyan);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .url-chip:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.3);
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 2rem;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-violet);
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-icon {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            opacity: 0.2;
+            width: 40px;
+            height: 40px;
+        }
+
+        .section-title {
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .section-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--glass-border);
+        }
+
+        .table-container {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            overflow-x: auto;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1.2rem 1.5rem;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-cyan);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 1.2rem 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-primary);
+        }
+
+        .price { color: var(--success); font-weight: 600; }
+        
+        .empty-state {
+            padding: 4rem;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Stats Coloring */
+        .records .stat-value { color: var(--accent-cyan); }
+        .duration .stat-value { color: #f6d365; }
+        .errors .stat-value { color: var(--error); }
+
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>ScrapeWizard Report</h1>
-        <p>Target: <a href="{{ meta.url }}">{{ meta.url }}</a></p>
-        <p>Generated: {{ meta.generated_at }}</p>
-    </div>
+    <div class="container">
+        <header>
+            <div class="brand-logo">SCRAPEWIZARD</div>
+            <div class="meta-info">
+                <div>Generated on: {{ meta.generated_at }}</div>
+                <div style="margin-top: 5px;">
+                    <a href="{{ meta.url }}" target="_blank" class="url-chip">{{ meta.url[:50] }}{% if meta.url|length > 50 %}...{% endif %}</a>
+                </div>
+            </div>
+        </header>
 
-    <div class="stats">
-        <div class="stat-box">
-            <div class="stat-value">{{ stats.rows_extracted }}</div>
-            <div>Rows Extracted</div>
+        <div class="dashboard-grid">
+            <div class="card records">
+                <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <div class="stat-label">Total Records</div>
+                <div class="stat-value">{{ stats.rows_extracted }}</div>
+                <div style="font-size: 0.8rem; color: var(--success);">Extraction Complete</div>
+            </div>
+            <div class="card duration">
+                <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <div class="stat-label">Execution Time</div>
+                <div class="stat-value">{{ stats.duration_seconds }}s</div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary);">Avg 0.2s / record</div>
+            </div>
+            <div class="card errors">
+                <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+                <div class="stat-label">System Health</div>
+                <div class="stat-value">{{ stats.error_count }}</div>
+                <div style="font-size: 0.8rem; color: {% if stats.error_count == 0 %}var(--success){% else %}var(--error){% endif %};">
+                    {% if stats.error_count == 0 %}Clean execution{% else %}Issues detected{% endif %}
+                </div>
+            </div>
         </div>
-        <div class="stat-box">
-            <div class="stat-value">{{ stats.duration_seconds }}s</div>
-            <div>Duration</div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-value">{{ stats.error_count }}</div>
-            <div>Errors</div>
+
+        <h2 class="section-title">Data Intelligence Preview</h2>
+        
+        <div class="table-container">
+            {% if sample_data %}
+            <table>
+                <thead>
+                    <tr>
+                        {% for key in sample_data[0].keys() %}
+                        <th>{{ key.replace('_', ' ') }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in sample_data %}
+                    <tr>
+                        {% for value in row.values() %}
+                        <td>
+                            {% if "http" in value|string %}
+                                <a href="{{ value }}" target="_blank" style="color: var(--accent-cyan);">View Resource</a>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                No data records available for preview.
+            </div>
+            {% endif %}
         </div>
     </div>
-
-    <h2>Sample Data</h2>
-    <table>
-        <thead>
-            <tr>
-                {% if sample_data %}
-                {% for key in sample_data[0].keys() %}
-                <th>{{ key }}</th>
-                {% endfor %}
-                {% endif %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in sample_data %}
-            <tr>
-                {% for value in row.values() %}
-                <td>{{ value }}</td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
 </body>
 </html>
+

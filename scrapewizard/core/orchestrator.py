@@ -508,6 +508,13 @@ class Orchestrator:
             pagination = "first_page"
             fmt = "json"
             browser_mode = understanding.get("recommended_browser_mode", "headless")
+            
+            # Define pagination_config for CI mode
+            pagination_config = {
+                "mode": "first_page",
+                "max_pages": 1
+            }
+            
             log(f"CI Mode: Using defaults - Fields: {fields}, Pagination: {pagination}, Format: {fmt}, Browser Mode: {browser_mode}")
         else:
             all_fields = understanding.get("available_fields", [])
@@ -862,6 +869,22 @@ class Orchestrator:
         
         # Copy logs folder
         logs_src = self.project_dir / "logs"
+        logs_dst = output_dir / "logs"
+        if logs_src.exists():
+            if logs_dst.exists():
+                shutil.rmtree(logs_dst)
+            shutil.copytree(logs_src, logs_dst)
+            
+        # Generate HTML Report (AFTER data.json is in output folder)
+        try:
+            from scrapewizard.report.html_generator import ReportGenerator
+            generator = ReportGenerator(self.project_dir)
+            generator.generate()
+            report_src = self.project_dir / "report.html"
+            if report_src.exists():
+                shutil.copy2(report_src, output_dir / "report.html")
+        except Exception as e:
+            log(f"Failed to generate HTML report: {e}", level="warning")
         logs_dst = output_dir / "logs"
         if logs_src.exists():
             if logs_dst.exists():
