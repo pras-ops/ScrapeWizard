@@ -1,0 +1,56 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Abstract Extraction Tree (AET)",
+    "description": "Deterministic representation of a scraping strategy",
+    "type": "object",
+    "properties": {
+        "project_id": {
+            "type": "string"
+        },
+        "root_url": {
+            "type": "string",
+            "format": "uri"
+        },
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "enum": [
+                            "list",
+                            "field",
+                            "pagination"
+                        ]
+                    },
+                    "selector_chain": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "metadata": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "name",
+                    "type",
+                    "selector_chain"
+                ]
+            }
+        },
+        "version": {
+            "type": "string",
+            "default": "2.0"
+        }
+    },
+    "required": [
+        "project_id",
+        "root_url",
+        "nodes"
+    ]
+}

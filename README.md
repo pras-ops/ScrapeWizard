@@ -109,7 +109,49 @@ python -m scrapewizard.cli.main version
 python -m scrapewizard.cli.main --version
 ```
 
-## Project Output
+---
+
+## 🌉 MVP2 Bridge Commands (Studio Integration)
+
+ScrapeWizard is evolving. These commands bridge the gap between the CLI version (MVP1) and the upcoming Desktop IDE (MVP2).
+
+### 1. `studio` - Launch Backend
+Starts the FastAPI backend for the ScrapeWizard Studio desktop application.
+```bash
+# Starts on http://localhost:7331 by default
+python -m scrapewizard.cli.main studio --port 7331
+```
+
+### 2. `record` - Session Capture
+Records a manual browsing session and captures events (clicks, scrolls) for Studio integration.
+```bash
+python -m scrapewizard.cli.main record --url "https://books.toscrape.com" --output "recording.json"
+```
+
+### 3. `test` - Runtime Validation
+Validates a generated scraper against a recorded baseline to detect "drift" or selector failures.
+```bash
+python -m scrapewizard.cli.main test --project "my_project" --compare-to "recording.json"
+```
+
+---
+
+## ⚙️ Configuration
+
+### Global Config
+Stored in `~/.scrapewizard/config.json`. Managed via the `setup` command.
+
+### Local Config Overrides
+You can now override global settings (model, provider, etc.) on a per-project basis using a `.scrapewizardrc` file in your project root.
+
+```json
+{
+  "model": "gpt-4-local-override",
+  "provider": "openai"
+}
+```
+
+## 🏗️ Project Output
 
 Projects are saved in `~/scrapewizard_projects/`.
 Each project contains a self-contained `output/` folder:

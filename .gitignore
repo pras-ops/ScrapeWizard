@@ -50,4 +50,5 @@ htmlcov/
 
 # OS
 .DS_Store
-Thumbs.db
+# ScrapeWizard Studio
+# studio/
