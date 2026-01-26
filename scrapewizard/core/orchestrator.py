@@ -45,7 +45,17 @@ class Orchestrator:
     Uses synchronous flow with isolated async blocks for browser operations.
     """
 
-    def __init__(self, project_dir: Path, ci_mode: bool = False, wizard_mode: bool = True, guided_tour: bool = False, interactive_mode: bool = False):
+    def __init__(
+        self, 
+        project_dir: Path, 
+        ci_mode: bool = False, 
+        wizard_mode: bool = True, 
+        guided_tour: bool = False, 
+        interactive_mode: bool = False,
+        ai_provider: Optional[str] = None,
+        ai_model: Optional[str] = None,
+        ai_key: Optional[str] = None
+    ):
         self.project_dir = Path(project_dir)
         self.ci_mode = ci_mode
         self.wizard_mode = wizard_mode  # Default: Zero-Click logic
@@ -56,6 +66,9 @@ class Orchestrator:
         if not self.session:
             raise ValueError(f"Invalid project directory: {project_dir}")
         self.start_time = time.time()
+        
+        # Initialize session-persistent LLMClient with ad-hoc overrides
+        self.llm_client = LLMClient(provider=ai_provider, api_key=ai_key, model=ai_model)
         
     def _emit_wide_event(self, success: bool, error: Optional[str] = None) -> None:
         """Emit a 'Wide Event' JSON with full session metadata."""
@@ -293,6 +306,9 @@ class Orchestrator:
             browser = BrowserManager(headless=False, wizard_mode=self.wizard_mode)
             await browser.start()
             try:
+                # Start recording navigation steps
+                await browser.start_interactive_recording()
+                
                 url = self.session["url"]
                 print(f"Opening {url} ...")
                 print("1. Please Navigate / Search / Filter to reach your target data.")
@@ -306,12 +322,14 @@ class Orchestrator:
                 cookies = await browser.get_cookies()
                 storage_state = await browser.get_storage_state()
                 final_url = browser.page.url
+                recorded_steps = browser.recorded_events
                 
                 safe_write_json(self.project_dir / "cookies.json", cookies)
                 safe_write_json(self.project_dir / "storage_state.json", storage_state)
                 
                 self.session["url"] = final_url
                 self.session["login_performed"] = True
+                self.session["navigation_steps"] = recorded_steps
                 
             finally:
                 await browser.close()
@@ -471,7 +489,7 @@ class Orchestrator:
         self._progress_step(3, "Analyzing data patterns", duration=3.0)
         self._narrate("I'm using AI to understand the layout and find the best fields to scrape. I'm looking for product titles, prices, and other key details.")
         
-        agent = UnderstandingAgent(self.project_dir, wizard_mode=self.wizard_mode)
+        agent = UnderstandingAgent(self.project_dir, wizard_mode=self.wizard_mode, client=self.llm_client)
         
         snapshot = safe_read_json(self.project_dir / "analysis_snapshot.json")
         interaction = safe_read_json(self.project_dir / "interaction.json")
@@ -593,7 +611,7 @@ class Orchestrator:
         self._progress_step(5, "Writing scraper", duration=4.0)
         self._narrate("I'm now writing the actual Python code for your scraper. I use Playwright as the engine because it's great at handling modern websites.")
         
-        agent = CodeGenerator(self.project_dir, wizard_mode=self.wizard_mode)
+        agent = CodeGenerator(self.project_dir, wizard_mode=self.wizard_mode, client=self.llm_client)
         
         snapshot = safe_read_json(self.project_dir / "analysis_snapshot.json")
         understanding = safe_read_json(self.project_dir / "llm_understanding.json")
@@ -726,7 +744,7 @@ class Orchestrator:
         self._progress_step(5, "Self-healing", duration=2.0)
         self._narrate("The test failed, so I'm investigating the error. I'll automatically try to find more stable selectors and fix the script.")
         
-        loop = RepairLoop(self.project_dir, wizard_mode=self.wizard_mode)
+        loop = RepairLoop(self.project_dir, wizard_mode=self.wizard_mode, client=self.llm_client)
         
         # Check if user flagged specific columns
         fix_columns = self.session.get("fix_columns", None)
@@ -831,6 +849,18 @@ class Orchestrator:
                 output_format = self.session.get('format', 'xlsx')
                 output_file = self.project_dir / "output" / f"data.{output_format}"
                 print(f"\n✅ Done!\n")
+                
+                # Print AI Usage Summary
+                from scrapewizard.llm.client import LLMClient
+                stats = LLMClient.get_usage_stats()
+                if stats["calls"] > 0:
+                    client = LLMClient()
+                    cost = client.get_estimated_cost()
+                    print(f"🤖 [bold cyan]AI Usage Summary:[/bold cyan]")
+                    print(f"   • Calls: {stats['calls']}")
+                    print(f"   • Tokens: {stats['input_tokens'] + stats['output_tokens']} ({stats['input_tokens']} in, {stats['output_tokens']} out)")
+                    print(f"   • Est. Cost: ${cost:.4f}\n")
+
                 print(f"Your data is ready:")
                 print(f"{output_file}\n")
             else:

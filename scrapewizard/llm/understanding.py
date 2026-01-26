@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_UNDERSTANDING
 from scrapewizard.core.logging import log
@@ -12,8 +12,8 @@ class UnderstandingAgent:
     This agent takes a DOM snapshot and behavioral signals to identify the
     underlying data structure and suggest relevant fields for scraping.
     """
-    def __init__(self, project_dir: Path, wizard_mode: bool = False):
-        self.client = LLMClient()
+    def __init__(self, project_dir: Path, wizard_mode: bool = False, client: Optional[LLMClient] = None):
+        self.client = client or LLMClient()
         self.project_dir = project_dir
         self.wizard_mode = wizard_mode
 

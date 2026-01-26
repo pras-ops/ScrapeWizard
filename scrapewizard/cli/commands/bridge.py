@@ -14,7 +14,7 @@ def studio(port: int = typer.Option(7331, help="Port to run the Studio backend o
     try:
         import uvicorn
         from studio.backend.main import app
-        typer.echo(f"🚀 Starting ScrapeWizard Studio Backend on http://localhost:{port}")
+        typer.echo(f"Starting ScrapeWizard Studio Backend on http://localhost:{port}")
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
     except ImportError as e:
         typer.echo(f"❌ Error: Studio backend or dependencies not found. {e}", err=True)

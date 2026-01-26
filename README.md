@@ -1,17 +1,25 @@
-# 🚀 ScrapeWizard (MVP-1.0.0)
+# 🧙 ScrapeWizard – MVP1
 
-**CLI-Based Agentic Scraper Builder**
+**AI-Assisted Scraper Builder for Developers**
 
-ScrapeWizard automates the creation of web scrapers using LLMs (OpenAI, Anthropic, etc.). It analyzes websites, understands the structure, and generates robust Playwright scrapers that run locally.
+ScrapeWizard is an **AI-powered scraper generator** designed to help developers build reliable Playwright scrapers in minutes. It follows a clear principle: **“AI helps you BUILD scrapers – it does NOT run them.”**
 
-- **🧙 Wizard Mode (Default)**: Simple, "Zero-Click" intelligent agent - just give it a URL and get clean data.
+## 🟢 What ScrapeWizard Is Today (v1.2.0)
+
+ScrapeWizard MVP1 is a professional developer tool for rapidly generating maintainable, standalone scrapers.
+
+### Core Capabilities:
+- ✅ **Interactive CLI Builder**: Guided process from URL to code.
+- ✅ **AI Analysis**: Automatic structure, pattern, and field detection.
+- ✅ **Multiple LLM Support**: Choose between OpenAI, Anthropic, OpenRouter, or Local (Ollama) providers.
+- ✅ **AI Cost Transparency**: Real-time token tracking and cost estimation for every build.
+- ✅ **Smart Assessment**: Pre-flight checks for anti-bot measures.
 - **Unified Decision Gates (v1.1)**: Critical checkpoints where the user owns the "WHAT" while the AI handles the "HOW":
     - **Gate 1: Output Format**: Choose CSV, Excel, or JSON upfront.
     - **Gate 2: Pagination Scope**: Define scrape depth (Single page, 5-page limit, or all pages).
     - **Gate 3: Data Quality Firewall**: Monitors extraction results; if missing data is detected, it triggers a recovery loop.
 - **Interactive Recovery**: Never get stuck. If a run fails, choose:
     - 🩺 **Auto-Repair**: AI fixes specific selectors for missing fields.
-    - 🖐️ **Guided Mode**: Re-run with a visible browser for manual corrections.
     - 🔄 **Full Retry**: Re-generate the entire strategy from scratch.
 - **Scraper Runtime Contract (SRC)**: AI implementation of specific classes only. Infrastructure (Browser, Pagination loop, I/O) is owned by the ScrapeWizard SDK, eliminating hallucinations.
 - **Dynamic Waiting**: Automatic handling of hydration delays via `smart_wait()`.
@@ -29,109 +37,75 @@ playwright install-deps
 
 ## Commands & Examples
 
-### 1. `auth` - Secure API Key Storage
+### 1. `login` - Secure API Key Storage
 Store your AI providers' API key safely in your system's keyring. No plain text storage.
 ```bash
-python -m scrapewizard.cli.main auth sk-or-v1-xyz...
+scrapewizard login "sk-or-v1-xyz..."
 ```
 
 ### 2. `setup` - Configuration
 Initial setup to configure your LLM provider and default model.
 ```bash
-python -m scrapewizard.cli.main setup
+scrapewizard setup
 ```
 
-### 2. `scrape` - Build a Scraper
+### 3. `build` - Create a Scraper
 The main command to start a new scraping project.
 
 **Zero-Click Mode (Default - "Just Works"):**
 ```bash
 # Provide URL - ScrapeWizard guides you through simplified format and pagination gates
-python -m scrapewizard.cli.main scrape --url "https://www.amazon.in/s?k=phones"
+scrapewizard build --url "https://books.toscrape.com"
+```
 
-# Interaction Flow:
-# ? Output Format: Excel
-# ? Pagination Strategy: Limit to 5 Pages
-# ...
-# ✓ Found 5 data fields: title, price, image...
-# 🩺 Quality Check: Success!
-# ⚡ Scraped 31 items → Saved to data.xlsx
-# ✅ Done!
+**Ad-hoc AI Override:**
+```bash
+# Specify provider and model for a single build session
+scrapewizard build --url "https://books.toscrape.com" \
+                   --ai-provider anthropic \
+                   --ai-model claude-3-5-sonnet-20240620
 ```
 
 **Interactive Mode (Custom Control):**
 ```bash
 # Ask me "One Smart Question" about fields or format
-python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com" --interactive
+scrapewizard build --url "https://books.toscrape.com" --interactive
 ```
 
 **Expert Mode (Full Technical Output):**
 ```bash
-# Shows debug logs, state transitions, LLM warnings, repair loops, and full manual control
-python -m scrapewizard.cli.main scrape --url "https://books.toscrape.com" --expert
+# Shows debug logs, state transitions, LLM warnings, and repair loops
+scrapewizard build --url "https://books.toscrape.com" --expert
 ```
 
-**CI Mode (Non-Interactive):**
-```bash
-# Auto-accepts defaults, no prompts
-python -m scrapewizard.cli.main scrape --url https://books.toscrape.com --ci
-```
-
-### 3. `list` - View Projects
+### 4. `list` - View Projects
 List all previously created scraper projects.
 ```bash
-python -m scrapewizard.cli.main list
+scrapewizard list
 ```
 
-### 4. `resume` - Continue Work
+### 5. `resume` - Continue Work
 Resume a project that was stopped or failed.
 ```bash
-python -m scrapewizard.cli.main resume
+scrapewizard resume "PROJECT_ID"
 ```
 
-### 5. `doctor` - Health Check
+### 6. `doctor` - Health Check
 Verify your environment, dependencies, and LLM connectivity.
 ```bash
-python -m scrapewizard.cli.main doctor
+scrapewizard doctor
 ```
 
-### 6. `clean` - Cleanup
+### 7. `clean` - Cleanup
 Remove temporary files or old projects to save space.
 ```bash
-python -m scrapewizard.cli.main clean
+scrapewizard clean
 ```
 
-### 7. `version` - Version Info
+### 8. `version` - Version Info
 Check the current version of ScrapeWizard.
 ```bash
-python -m scrapewizard.cli.main version
-# OR
-python -m scrapewizard.cli.main --version
-```
-
----
-
-## 🌉 MVP2 Bridge Commands (Studio Integration)
-
-ScrapeWizard is evolving. These commands bridge the gap between the CLI version (MVP1) and the upcoming Desktop IDE (MVP2).
-
-### 1. `studio` - Launch Backend
-Starts the FastAPI backend for the ScrapeWizard Studio desktop application.
-```bash
-# Starts on http://localhost:7331 by default
-python -m scrapewizard.cli.main studio --port 7331
-```
-
-### 2. `record` - Session Capture
-Records a manual browsing session and captures events (clicks, scrolls) for Studio integration.
-```bash
-python -m scrapewizard.cli.main record --url "https://books.toscrape.com" --output "recording.json"
-```
-
-### 3. `test` - Runtime Validation
-Validates a generated scraper against a recorded baseline to detect "drift" or selector failures.
-```bash
-python -m scrapewizard.cli.main test --project "my_project" --compare-to "recording.json"
+scrapewizard version
 ```
 
 ---

@@ -1,14 +1,16 @@
-from fastapi import FastAPI, WebSocket, BackgroundTasks
+from fastapi import FastAPI, WebSocket, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
 import sys
 import os
+import json
 from typing import List, Optional
 
 # Add root to sys.path to access scrapewizard core
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+from scrapewizard.core.logging import log
 from studio.backend.state import StudioState, StudioProject, FieldDefinition
 from studio.backend.browser_manager import StudioBrowserManager
 
@@ -66,24 +68,38 @@ async def get_dom_project(project_id: str):
 
 @app.websocket("/cdp/ws")
 async def cdp_proxy(ws: WebSocket):
+    """Robust bi-directional CDP proxy for Studio Inspector."""
     await ws.accept()
+    log("CDP WebSocket connection established", level="info")
+    
+    # Use the existing browser_manager to get a session
+    # or follow the user's "launch as you go" plan for the proxy.
+    # Given the isolation, we'll try to get the existing session first.
     try:
-        session = await browser_manager.get_cdp_session()
-        
-        # Forward messages from browser to client
-        # We need to wrap the listener in an async task
-        async def forward_to_client(event_name, params):
-            try:
-                await ws.send_json({"method": event_name, "params": params})
-            except:
-                pass
+        if not browser_manager.page:
+            # If no page is active, start a default one (or wait for session/start)
+            await browser_manager.start("about:blank")
+            
+        cdp_session = await browser_manager.get_cdp_session()
 
-        # Since we can't easily subscribe to ALL events in Playwright's CDP without listing them,
-        # we'll focus on the ones needed for Studio/Inspector or use the session.send for commands.
-        # However, for a generic proxy, we'd want more.
-        
-        # For now, let's implement the bi-directional command flow
+        async def browser_to_client():
+            """Forward messages from Browser (CDP) -> Studio Client (WS)."""
+            try:
+                while True:
+                    # cdp_session.receive() is the Playwright internal for getting events/responses
+                    # However, to avoid blocking, we use the .on() listeners for events
+                    # and the session.send() for command results.
+                    # As a generic proxy, we'll use a queue or similar if needed, 
+                    # but Playwright's CDP session doesn't easily expose a "receive all" poll.
+                    
+                    # Instead, we'll rely on the specific command results and events 
+                    # we've already set up, but let's try to make it more generic.
+                    await asyncio.sleep(0.1) # Placeholder for the loop if needed
+            except Exception as e:
+                log(f"CDP Browser -> Client error: {e}", level="error")
+
         async def client_to_browser():
+            """Forward messages from Studio Client (WS) -> Browser (CDP)."""
             try:
                 while True:
                     msg = await ws.receive_json()
@@ -91,21 +107,95 @@ async def cdp_proxy(ws: WebSocket):
                     params = msg.get("params", {})
                     msg_id = msg.get("id")
                     
-                    result = await session.send(method, params)
-                    if msg_id is not None:
-                        await ws.send_json({"id": msg_id, "result": result})
+                    if method == "Input.dispatchMouseEvent":
+                        # Params: type, x, y, button, etc.
+                        # browser_manager expects: event_type='mouse', params={action, x, y, ...}
+                        # We map CDP-like params to our simple manager
+                        etype = params.get("type")
+                        mapping = {
+                            "mousePressed": "down",
+                            "mouseReleased": "up",
+                            "mouseMoved": "move",
+                            "mouseWheel": "wheel"
+                        }
+                        if etype in mapping:
+                            await browser_manager.handle_input_event("mouse", {
+                                "action": mapping[etype],
+                                "x": params.get("x"),
+                                "y": params.get("y"),
+                                "deltaX": params.get("deltaX", 0),
+                                "deltaY": params.get("deltaY", 0),
+                                "button": params.get("button", "left")
+                            })
+                    elif method == "Input.dispatchKeyEvent":
+                        # TODO: Map keys if needed
+                        pass
+                    elif method:
+                        result = await cdp_session.send(method, params)
+                        if msg_id is not None:
+                            await ws.send_json({"id": msg_id, "result": result})
             except Exception as e:
-                print(f"WS Client -> Browser Error: {e}")
+                log(f"CDP Client -> Browser error: {e}", level="error")
 
-        # Listen for some common events to forward (e.g., Screencast, Console, Network)
-        session.on("Page.screencastFrame", lambda payload: asyncio.create_task(ws.send_json({"method": "Page.screencastFrame", "params": payload})))
-        session.on("Runtime.consoleAPICalled", lambda payload: asyncio.create_task(ws.send_json({"method": "Runtime.consoleAPICalled", "params": payload})))
+        # Hook into browser_manager's internal screencast logic
+        async def handle_screencast_frame(data):
+            # Forward the frame to the frontend
+            try:
+                await ws.send_json({"method": "Page.screencastFrame", "params": {"data": data}})
+            except Exception:
+                pass
 
+        browser_manager.on_frame = handle_screencast_frame
+        
+        # Hook into browser_manager's inspector logic
+        async def handle_selection(data_str: str):
+            try:
+                data = json.loads(data_str)
+                if data['type'] == 'hover':
+                    await ws.send_json({"method": "Inspector.highlight", "params": data})
+                elif data['type'] == 'select':
+                    await ws.send_json({"method": "Inspector.selected", "params": data})
+            except Exception as e:
+                log(f"Inspector error: {e}", level="error")
+
+        browser_manager.on_selection = handle_selection
+
+        # Subscribe to standard events from the *second* session for other things
+        def forward_event(event, params):
+            try:
+                # We need to use the current event loop of the app
+                asyncio.run_coroutine_threadsafe(ws.send_json({"method": event, "params": params}), asyncio.get_event_loop())
+            except Exception as e:
+                # Ignore failures if socket is closed
+                pass
+
+        # In Playwright, .on() can take a sync or async function.
+        # We'll use a wrapper to ensure it forwards to the WS.
+        def create_forwarder(event_name):
+            def handler(params):
+                # Create a task to send the message
+                asyncio.create_task(ws.send_json({"method": event_name, "params": params}))
+            return handler
+
+        # Standard events for Inspector
+        cdp_session.on("Page.screencastFrame", create_forwarder("Page.screencastFrame"))
+        cdp_session.on("Runtime.consoleAPICalled", create_forwarder("Runtime.consoleAPICalled"))
+        cdp_session.on("Network.requestWillBeSent", create_forwarder("Network.requestWillBeSent"))
+        cdp_session.on("DOM.documentUpdated", create_forwarder("DOM.documentUpdated"))
+        cdp_session.on("Page.loadEventFired", create_forwarder("Page.loadEventFired"))
+
+        # Run the command loop
         await client_to_browser()
+        
+    except WebSocketDisconnect:
+        log("CDP WebSocket disconnected", level="info")
     except Exception as e:
-        print(f"CDP Proxy Error: {e}")
+        log(f"CDP Proxy failed: {e}", level="error")
     finally:
-        await ws.close()
+        try:
+            await ws.close()
+        except:
+            pass
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

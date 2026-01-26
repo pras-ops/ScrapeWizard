@@ -16,7 +16,10 @@ def scrape(
     ci: bool = typer.Option(False, "--ci", help="Run in non-interactive CI mode (auto-accept defaults)"),
     expert: bool = typer.Option(False, "--expert", help="Expert mode - show all technical details (full manual control)"),
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Interactive mode - enabling smart questions (defaults to Zero-Click)"),
-    guided_tour: bool = typer.Option(False, "--guided-tour", help="Guided tour mode - step-by-step narration")
+    guided_tour: bool = typer.Option(False, "--guided-tour", help="Guided tour mode - step-by-step narration"),
+    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="Override default AI provider"),
+    ai_model: Optional[str] = typer.Option(None, "--ai-model", help="Override default AI model"),
+    ai_key: Optional[str] = typer.Option(None, "--api-key", help="Override default API key")
 ):
     """
     Start a new scraping session for a URL.
@@ -62,7 +65,16 @@ def scrape(
             log(f"Project directory: {project_dir}")
 
         # Start Orchestrator
-        orchestrator = Orchestrator(project_dir, ci_mode=ci, wizard_mode=wizard_mode, guided_tour=guided_tour, interactive_mode=interactive)
+        orchestrator = Orchestrator(
+            project_dir, 
+            ci_mode=ci, 
+            wizard_mode=wizard_mode, 
+            guided_tour=guided_tour, 
+            interactive_mode=interactive,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+            ai_key=ai_key
+        )
         orchestrator.run()
         
     except KeyboardInterrupt:

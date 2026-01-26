@@ -14,8 +14,8 @@ class RepairAgent:
     This agent uses full project context, including previous failures and
     site metadata, to diagnose and fix failing scraper scripts.
     """
-    def __init__(self, project_dir: Path):
-        self.client = LLMClient()
+    def __init__(self, project_dir: Path, client: Optional[LLMClient] = None):
+        self.client = client or LLMClient()
         self.project_dir = Path(project_dir)
 
     def repair(self, script_path: Path, error_info: str, context: str = "", bad_cols: Optional[List[str]] = None) -> bool:

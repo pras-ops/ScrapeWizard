@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from scrapewizard.llm.client import LLMClient
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_CODEGEN
 from scrapewizard.core.logging import log
@@ -13,8 +13,8 @@ class CodeGenerator:
     This agent takes the analyzed data structure and generates a fully
     functional Playwright script tailored to the target site's layout.
     """
-    def __init__(self, project_dir: Path, wizard_mode: bool = False):
-        self.client = LLMClient()
+    def __init__(self, project_dir: Path, wizard_mode: bool = False, client: Optional[LLMClient] = None):
+        self.client = client or LLMClient()
         self.project_dir = project_dir
         self.wizard_mode = wizard_mode
 
@@ -41,6 +41,16 @@ class CodeGenerator:
         cookies_context = ""
         if (self.project_dir / "storage_state.json").exists():
             cookies_context = "- A 'storage_state.json' file exists and will be automatically loaded by the BaseScraper runtime.\n"
+        
+        # Navigation Steps context
+        nav_steps = interaction.get("navigation_steps", []) if interaction else []
+        nav_context = ""
+        if nav_steps:
+            nav_context = f"""
+- USER NAVIGATION STEPS RECORDED: {json.dumps(nav_steps, indent=2)}
+- NOTE: These steps are passed to the Scraper class and will be automatically replayed by the ScrapeWizard BaseScraper runtime before calling navigate(). 
+- You should still implement navigate() if any additional dynamic setup is needed, otherwise you can leave it empty.
+"""
         
         # Hostility Override - Make hostility score visible to LLM
         hostility_score = scan_profile.get("hostility_score", 0) if scan_profile else 0
@@ -87,7 +97,8 @@ if __name__ == "__main__":
         mode="{run_config.get('browser_mode', 'headless')}", 
         output_format="{run_config.get('format', 'json')}", 
         pagination_config={json.dumps(run_config.get('pagination_config', {"mode": "first_page", "max_pages": 1}))},
-        pagination_meta={json.dumps(understanding.get("pagination", {}))}
+        pagination_meta={json.dumps(understanding.get("pagination", {}))},
+        navigation_steps={json.dumps(nav_steps)}
     ).run()
 ```
 

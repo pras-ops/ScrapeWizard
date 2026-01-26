@@ -76,17 +76,63 @@ class StudioBrowserManager:
                 if (el.id) node.id = el.id;
                 if (el.className) node.className = el.className;
                 
-                // Only descend into reasonable depths/types for the MVP tree
-                if (el.children.length < 100) { 
-                    for (const child of el.children) {
-                        node.children.push(serialize(child));
+                // Truncate list if too long to prevent massive payloads
+                const childrenToProcess = Array.from(el.children).slice(0, 500);
+                
+                for (const child of childrenToProcess) {
+                    node.children.push(serialize(child));
+                }
+                
+                if (el.children.length > 500) {
+                     node.children.push({ tag: 'div', attributes: { class: 'sw-truncated-msg' }, children: [], text: `... ${el.children.length - 500} more items ...` });
+                }
+                
+                // Content for leaf nodes
+                if (node.children.length === 0) {
+                    const text = el.innerText || el.textContent;
+                    if (text && text.trim().length > 0) {
+                        node.text = text.trim().substring(0, 50); // Truncate text preview
                     }
                 }
+                
                 return node;
             };
             return serialize(document.body);
         }""")
         return tree
+
+    async def handle_input_event(self, event_type: str, params: dict):
+        if not self.page:
+            return
+
+        try:
+            if event_type == 'mouse':
+                x, y = params.get('x', 0), params.get('y', 0)
+                action = params.get('action')
+                
+                if action == 'move':
+                    await self.page.mouse.move(x, y)
+                elif action == 'down':
+                    await self.page.mouse.down()
+                elif action == 'up':
+                    await self.page.mouse.up()
+                elif action == 'click':
+                    await self.page.mouse.click(x, y)
+                elif action == 'wheel':
+                    await self.page.mouse.wheel(params.get('deltaX', 0), params.get('deltaY', 0))
+            
+            elif event_type == 'keyboard':
+                action = params.get('action')
+                key = params.get('key')
+                if action == 'down':
+                    await self.page.keyboard.down(key)
+                elif action == 'up':
+                    await self.page.keyboard.up(key)
+                elif action == 'press':
+                    await self.page.keyboard.press(key)
+
+        except Exception as e:
+            print(f"Input error: {e}")
 
     async def stop(self):
         if self.browser:

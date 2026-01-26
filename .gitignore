@@ -50,5 +50,7 @@ htmlcov/
 
 # OS
 .DS_Store
-# ScrapeWizard Studio
-# studio/
+ScrapeWizard Studio
+/studio
+.learn.md
+

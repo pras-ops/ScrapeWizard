@@ -2,15 +2,16 @@ from pathlib import Path
 from typing import Callable, Optional, List
 from scrapewizard.healing.classifier import ErrorClassifier
 from scrapewizard.llm.repair import RepairAgent
+from scrapewizard.llm.client import LLMClient
 from scrapewizard.core.logging import log
 
 class RepairLoop:
     """
     Manages the test-fail-repair cycle with optional column-specific hints.
     """
-    def __init__(self, project_dir: Path, wizard_mode: bool = False):
+    def __init__(self, project_dir: Path, wizard_mode: bool = False, client: Optional[LLMClient] = None):
         self.project_dir = project_dir
-        self.agent = RepairAgent(project_dir)
+        self.agent = RepairAgent(project_dir, client=client)
         self.max_attempts = 2
         self.wizard_mode = wizard_mode
 

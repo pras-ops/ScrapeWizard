@@ -10,11 +10,24 @@ class LLMClient:
     Supports OpenAI-compatible APIs (OpenAI, OpenRouter, Local).
     """
     
-    def __init__(self):
+    # Class-level usage tracking to accumulate across all instances (agents)
+    _usage_stats = {"input_tokens": 0, "output_tokens": 0, "calls": 0}
+    
+    # Approximate pricing per 1M tokens ($USD)
+    PRICING = {
+        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
+        "gpt-4o": {"input": 5.0, "output": 15.0},
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        "claude-3-5-sonnet": {"input": 3.0, "output": 15.0},
+        "claude-3-opus": {"input": 15.0, "output": 75.0},
+        "claude-3-haiku": {"input": 0.25, "output": 1.25},
+    }
+
+    def __init__(self, provider: Optional[str] = None, api_key: Optional[str] = None, model: Optional[str] = None):
         self.config = ConfigManager.load_config()
-        self.provider = self.config.get("provider", "openai")
-        self.api_key = self.config.get("api_key")
-        self.model = self.config.get("model", "gpt-4-turbo")
+        self.provider = provider or self.config.get("provider", "openai")
+        self.api_key = api_key or self.config.get("api_key")
+        self.model = model or self.config.get("model", "gpt-4-turbo")
         self.client = None
         
         self._setup_client()
@@ -25,6 +38,12 @@ class LLMClient:
             return
 
         try:
+            if self.provider == "anthropic":
+                import anthropic
+                self.client = anthropic.Anthropic(api_key=self.api_key)
+                log(f"Initialized Anthropic client with model: {self.model}")
+                return
+
             import openai
             base_url = None
             if self.provider == "openrouter":
@@ -37,8 +56,22 @@ class LLMClient:
                 api_key=self.api_key,
                 base_url=base_url
             )
-        except ImportError:
-            log("OpenAI package not installed. Run 'pip install openai'.", level="error")
+        except ImportError as e:
+            pkg = "anthropic" if self.provider == "anthropic" else "openai"
+            log(f"{pkg} package not installed. Run 'pip install {pkg}'.", level="error")
+
+    @classmethod
+    def get_usage_stats(cls) -> Dict[str, Any]:
+        """Get the global usage statistics."""
+        return cls._usage_stats
+
+    def get_estimated_cost(self) -> float:
+        """Calculate estimated cost based on tracked usage."""
+        model_pricing = self.PRICING.get(self.model, {"input": 0, "output": 0})
+        stats = self._usage_stats
+        input_cost = (stats["input_tokens"] / 1_000_000) * model_pricing["input"]
+        output_cost = (stats["output_tokens"] / 1_000_000) * model_pricing["output"]
+        return input_cost + output_cost
 
     def call(self, system_prompt: str, user_prompt: str, json_mode: bool = True) -> str:
         """
@@ -67,6 +100,13 @@ class LLMClient:
 
         try:
             response = self.client.chat.completions.create(**kwargs)
+            
+            # Track Usage
+            if hasattr(response, 'usage') and response.usage:
+                LLMClient._usage_stats["input_tokens"] += getattr(response.usage, 'prompt_tokens', 0)
+                LLMClient._usage_stats["output_tokens"] += getattr(response.usage, 'completion_tokens', 0)
+                LLMClient._usage_stats["calls"] += 1
+
             content = response.choices[0].message.content
             if not content:
                 log("LLM returned empty content.", level="warning")

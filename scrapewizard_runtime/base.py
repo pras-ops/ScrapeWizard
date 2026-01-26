@@ -9,12 +9,21 @@ from .io import write_json, write_csv, write_excel
 from .state import load_storage_state
 
 class BaseScraper(ABC):
-    def __init__(self, url: str = None, mode: str = "headless", output_format: str = "json", pagination_config: Dict = None, pagination_meta: Dict = None):
+    def __init__(
+        self, 
+        url: str = None, 
+        mode: str = "headless", 
+        output_format: str = "json", 
+        pagination_config: Dict = None, 
+        pagination_meta: Dict = None,
+        navigation_steps: List[Dict] = None
+    ):
         self.url = url
         self.mode = mode
         self.output_format = output_format
         self.pagination_config = pagination_config or {"mode": "first_page", "max_pages": 1}
         self.pagination_meta = pagination_meta or {}
+        self.navigation_steps = navigation_steps or []
         self.runtime = None
         self.page = None
         self.results = []
@@ -155,6 +164,13 @@ class BaseScraper(ABC):
         async def _run():
             await self.setup()
             try:
+                # 1. Replay recorded navigation steps if any
+                if self.navigation_steps:
+                    from .navigation import NavigationExecutor
+                    print(f"Replaying {len(self.navigation_steps)} recorded navigation steps...")
+                    await NavigationExecutor(self.page).execute_steps(self.navigation_steps)
+                
+                # 2. Allow generated navigate logic (if any)
                 await self.navigate()
                 await self.runtime.wait_for_idle()
                 

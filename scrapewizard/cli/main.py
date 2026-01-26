@@ -10,14 +10,14 @@ app = typer.Typer(
 
 # Register commands
 app.command()(setup.setup)
-app.command()(setup.auth)
-app.command()(scrape.scrape)
+app.command(name="login")(setup.auth)
+app.command(name="build")(scrape.scrape)
 app.command(name="list")(utils.list_projects)
 app.command()(utils.clean)
 app.command()(utils.doctor)
 app.command()(utils.resume)
 
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 
 @app.command()
 def version():
