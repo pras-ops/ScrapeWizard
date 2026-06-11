@@ -54,10 +54,8 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
   };
 
   const handleExport = () => {
-    window.open(`${api.exportPytest(testId)}`); // Trigger standard download
-    // Or we can create an anchor tag and click it to download:
     const a = document.createElement('a');
-    a.href = `http://127.0.0.1:8000/tests/${testId}/export`;
+    a.href = `/tests/${testId}/export`;
     a.download = `test_${testId}.py`;
     document.body.appendChild(a);
     a.click();

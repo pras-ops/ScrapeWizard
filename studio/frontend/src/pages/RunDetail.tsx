@@ -35,8 +35,10 @@ export default function RunDetail({ runId, onNavigate }: RunDetailProps) {
   useEffect(() => {
     loadRun();
 
-    // Establish WebSocket for live updates
-    const wsUrl = `${API_BASE.replace('http', 'ws')}/runs/${runId}/live`;
+    const loc = window.location;
+    const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = API_BASE ? API_BASE.replace(/^http(s)?:\/\//, '').replace(/\/$/, '') : loc.host;
+    const wsUrl = `${wsProto}//${wsHost}/runs/${runId}/live`;
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
