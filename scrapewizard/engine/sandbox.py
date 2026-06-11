@@ -66,10 +66,16 @@ class SandboxRunner:
     Isolated test runner that executes generated steps and tracks visual, console,
     network, and accessibility status quality signals.
     """
-    def __init__(self, artifacts_dir: Optional[str] = None, headless: bool = True):
+    def __init__(
+        self,
+        artifacts_dir: Optional[str] = None,
+        baselines_dir: Optional[str] = None,
+        flow_name: str = "default",
+        headless: bool = True,
+    ):
         self.headless = headless
         
-        # Setup artifacts directories
+        # Setup per-run artifacts directory (screenshots, diffs, reports)
         if artifacts_dir:
             self.artifacts_dir = Path(artifacts_dir)
         else:
@@ -77,8 +83,17 @@ class SandboxRunner:
             self.artifacts_dir = Path("runs") / f"run_{timestamp}"
             
         self.screenshots_dir = self.artifacts_dir / "screenshots"
-        self.baselines_dir = self.artifacts_dir / "baselines"
         self.diffs_dir = self.artifacts_dir / "diffs"
+
+        # Baselines live in a STABLE shared location, NOT under the per-run
+        # artifacts dir. This ensures successive runs compare against the same
+        # baseline images instead of re-baselining every execution.
+        if baselines_dir:
+            self.baselines_dir = Path(baselines_dir)
+        else:
+            self.baselines_dir = (
+                Path.home() / ".scrapewizard" / "baselines" / flow_name
+            )
 
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
         self.baselines_dir.mkdir(parents=True, exist_ok=True)

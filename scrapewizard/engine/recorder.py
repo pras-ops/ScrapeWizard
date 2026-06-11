@@ -60,11 +60,10 @@ class InteractiveRecorder:
                     log(f"Failed to capture element fingerprint: {e}", level="error")
                     return
                 
-                # Check for password masking
+                # Mask password field values for security
                 recorded_value = value
-                if fingerprint.attributes.get("type") == "password" or action == "fill" and value != "***MASKED***":
-                    if fingerprint.attributes.get("type") == "password":
-                        recorded_value = "***MASKED***"
+                if fingerprint.attributes.get("type") == "password":
+                    recorded_value = "***MASKED***"
                 
                 # Primary selector
                 primary_selector = fingerprint.selectors[0]["value"] if fingerprint.selectors else ""

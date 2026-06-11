@@ -1,6 +1,17 @@
+import sys
 import typer
 from scrapewizard.cli.commands import setup, scrape, utils, engine
 from scrapewizard.core.logging import Logger
+
+# Ensure Windows/CMD/PowerShell console supports UTF-8/emoji output without crashing
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 
 app = typer.Typer(
     name="scrapewizard",
