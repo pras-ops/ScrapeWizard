@@ -148,8 +148,10 @@ python tests/golden_sites/books.py
 
 ScrapeWizard is evolving from a CLI scraper builder into a **local-first UI/UX test automation
 platform** (record once → self-healing tests → admin portal), built on the same engine.
-The CLI scraper documented above remains the current, working product. See
-[PLATFORM_PLAN.md](PLATFORM_PLAN.md) for the full roadmap and architecture.
+The CLI scraper documented above remains the current, working product.
+
+- **[PLATFORM_PLAN.md](PLATFORM_PLAN.md)** — the full roadmap and architecture (source of truth)
+- **[BUILD_GUIDE.md](BUILD_GUIDE.md)** — step-by-step how-to for building each stage
 
 ## License
 MIT

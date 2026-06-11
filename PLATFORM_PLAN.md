@@ -41,6 +41,7 @@ enterprise feature breadth (RBAC/scheduling/drag-drop) until the moat ships and 
 | Studio backend | ✅ **Fixed 2026-06-11** | `WebSocketDisconnect` imported; dead `browser_to_client`/`forward_event` removed; bare `except` narrowed; localhost bind + CORS locked |
 | Studio frontend | ⚠️ Empty | Only `index.css`; zero components — portal is 100% to-build |
 | Syntax | ✅ Clean | All `.py` files compile; BS4 deprecation warning eliminated |
+| M1 foundation | ◑ In progress | `scrapewizard/engine/` (selector engine + fingerprint) and `scrapewizard/demo_app/` landed (`572ded9`); 31 tests pass. Remaining: recorder fingerprint wiring + name decision — see [BUILD_GUIDE.md](BUILD_GUIDE.md) Stage 1 |
 | Reusable assets | ✅ | Recorder, replay (`NavigationExecutor`), behavioral scanner + network interception, screenshots, HTML report generator, multi-provider `LLMClient` with token/cost tracking, FastAPI scaffold + CDP screencast proxy, keyring security |
 
 ## 3. Risk Register & Mitigations
