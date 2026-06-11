@@ -1,16 +1,28 @@
-# React + Vite
+# ScrapeWizard Studio — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The admin portal for the ScrapeWizard test automation platform (React + Vite).
 
-Currently, two official plugins are available:
+**Status:** scaffold only — screens are not yet built. The portal UI/UX spec, screen list,
+and build order live in [PLATFORM_PLAN.md](../../PLATFORM_PLAN.md) (§11 portal screens,
+§19 design spec, Milestone M3).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## React Compiler
+```bash
+npm install
+npm run dev      # Vite dev server on http://localhost:5173
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The backend API (FastAPI) runs separately on `http://127.0.0.1:8000`:
 
-## Expanding the ESLint configuration
+```bash
+python studio/backend/main.py
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+CORS on the backend is restricted to the Vite dev origins (`localhost:5173` / `127.0.0.1:5173`).
+
+## Planned structure (M3)
+
+- React Router + React Query for data
+- Component library: shadcn/ui (open decision §17 of PLATFORM_PLAN.md)
+- Screens: Dashboard · Tests · Step Manager · Live Run · Run History/Reports · Settings

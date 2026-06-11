@@ -35,6 +35,7 @@ from scrapewizard.recon.tech_fingerprint import TechFingerprinter
 from scrapewizard.llm.understanding import UnderstandingAgent
 from scrapewizard.llm.codegen import CodeGenerator
 from scrapewizard.llm.repair import RepairAgent
+from scrapewizard.llm.client import LLMClient
 
 from scrapewizard.healing.repair_loop import RepairLoop
 from scrapewizard.runtime.tester import ScriptTester
@@ -213,6 +214,14 @@ class Orchestrator:
         if not self.wizard_mode:
             log(f"Transitioning: {self.session['state']} -> {new_state.value}")
         self.session["state"] = new_state.value
+
+    @staticmethod
+    def _build_pagination_config(pagination: str) -> Dict[str, Any]:
+        """Convert a pagination choice into the runtime pagination config."""
+        return {
+            "mode": "all" if pagination == "all_pages" else "first_page",
+            "max_pages": 5 if pagination == "limit_5" else (50 if pagination == "all_pages" else 1)
+        }
 
     def _handle_init(self) -> None:
         """Step 1: Analyze complexity -> Ask Access Mode."""
@@ -527,12 +536,8 @@ class Orchestrator:
             fmt = "json"
             browser_mode = understanding.get("recommended_browser_mode", "headless")
             
-            # Define pagination_config for CI mode
-            pagination_config = {
-                "mode": "first_page",
-                "max_pages": 1
-            }
-            
+            pagination_config = self._build_pagination_config(pagination)
+
             log(f"CI Mode: Using defaults - Fields: {fields}, Pagination: {pagination}, Format: {fmt}, Browser Mode: {browser_mode}")
         else:
             all_fields = understanding.get("available_fields", [])
@@ -570,12 +575,8 @@ class Orchestrator:
                 if self.session.get("login_performed", False):
                      browser_mode = "headed"
                 
-                # Logic to convert UI choices to Runtime config
-                pagination_config = {
-                    "mode": "all" if pagination == "all_pages" else "first_page",
-                    "max_pages": 5 if pagination == "limit_5" else (50 if pagination == "all_pages" else 1)
-                }
-                
+                pagination_config = self._build_pagination_config(pagination)
+
             else:
                 # Expert Mode: Full selection
                 fields = UI.ask_fields(all_fields)
@@ -588,11 +589,7 @@ class Orchestrator:
                     reason = "Login performed."
                 browser_mode = UI.confirm_browser_mode(recommended_mode, reason, wizard_mode=False)
                 
-                # Expert Mode also needs pagination_config
-                pagination_config = {
-                    "mode": "all" if pagination == "all_pages" else "first_page",
-                    "max_pages": 5 if pagination == "limit_5" else (50 if pagination == "all_pages" else 1)
-                }
+                pagination_config = self._build_pagination_config(pagination)
         
         config = {
             "fields": fields,
@@ -851,7 +848,6 @@ class Orchestrator:
                 print(f"\n✅ Done!\n")
                 
                 # Print AI Usage Summary
-                from scrapewizard.llm.client import LLMClient
                 stats = LLMClient.get_usage_stats()
                 if stats["calls"] > 0:
                     client = LLMClient()
@@ -915,12 +911,7 @@ class Orchestrator:
                 shutil.copy2(report_src, output_dir / "report.html")
         except Exception as e:
             log(f"Failed to generate HTML report: {e}", level="warning")
-        logs_dst = output_dir / "logs"
-        if logs_src.exists():
-            if logs_dst.exists():
-                shutil.rmtree(logs_dst)
-            shutil.copytree(logs_src, logs_dst)
-        
+
         # Copy llm_logs folder
         llm_logs_src = self.project_dir / "llm_logs"
         llm_logs_dst = output_dir / "llm_logs"

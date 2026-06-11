@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, BackgroundTasks, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
@@ -19,7 +19,8 @@ browser_manager = StudioBrowserManager()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Local-only: portal dev server origins. Do not widen — this API can drive a browser.
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,21 +83,8 @@ async def cdp_proxy(ws: WebSocket):
             
         cdp_session = await browser_manager.get_cdp_session()
 
-        async def browser_to_client():
-            """Forward messages from Browser (CDP) -> Studio Client (WS)."""
-            try:
-                while True:
-                    # cdp_session.receive() is the Playwright internal for getting events/responses
-                    # However, to avoid blocking, we use the .on() listeners for events
-                    # and the session.send() for command results.
-                    # As a generic proxy, we'll use a queue or similar if needed, 
-                    # but Playwright's CDP session doesn't easily expose a "receive all" poll.
-                    
-                    # Instead, we'll rely on the specific command results and events 
-                    # we've already set up, but let's try to make it more generic.
-                    await asyncio.sleep(0.1) # Placeholder for the loop if needed
-            except Exception as e:
-                log(f"CDP Browser -> Client error: {e}", level="error")
+        # Browser -> client forwarding is handled by the cdp_session.on(...) event
+        # subscriptions below (see create_forwarder).
 
         async def client_to_browser():
             """Forward messages from Studio Client (WS) -> Browser (CDP)."""
@@ -160,15 +148,6 @@ async def cdp_proxy(ws: WebSocket):
 
         browser_manager.on_selection = handle_selection
 
-        # Subscribe to standard events from the *second* session for other things
-        def forward_event(event, params):
-            try:
-                # We need to use the current event loop of the app
-                asyncio.run_coroutine_threadsafe(ws.send_json({"method": event, "params": params}), asyncio.get_event_loop())
-            except Exception as e:
-                # Ignore failures if socket is closed
-                pass
-
         # In Playwright, .on() can take a sync or async function.
         # We'll use a wrapper to ensure it forwards to the WS.
         def create_forwarder(event_name):
@@ -194,8 +173,9 @@ async def cdp_proxy(ws: WebSocket):
     finally:
         try:
             await ws.close()
-        except:
+        except Exception:
             pass
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Local-only bind: this API can drive a real browser; never expose it on the network.
+    uvicorn.run(app, host="127.0.0.1", port=8000)

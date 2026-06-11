@@ -33,6 +33,9 @@ playwright install chromium
 
 # Linux Only: Install system dependencies
 playwright install-deps
+
+# Optional: only needed if you use the Anthropic provider
+pip install anthropic
 ```
 
 ## Commands & Examples
@@ -140,6 +143,13 @@ To verify the system integrity, run the automated golden tests:
 ```bash
 python tests/golden_sites/books.py
 ```
+
+## 🔭 Project Direction
+
+ScrapeWizard is evolving from a CLI scraper builder into a **local-first UI/UX test automation
+platform** (record once → self-healing tests → admin portal), built on the same engine.
+The CLI scraper documented above remains the current, working product. See
+[PLATFORM_PLAN.md](PLATFORM_PLAN.md) for the full roadmap and architecture.
 
 ## License
 MIT

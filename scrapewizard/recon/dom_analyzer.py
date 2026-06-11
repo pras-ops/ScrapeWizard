@@ -38,14 +38,6 @@ class DOMAnalyzer:
             len(children) >= 2 and
             len(set(child.name for child in children)) >= 2
         )
-        if len(children) >= 2:
-            return True
-            
-        # Recursive check: if it has a single child that is rich
-        if len(children) == 1:
-            return self._is_rich_container(children[0])
-            
-        return False
 
     def _detect_repeating_sections(self) -> List[Dict]:
         """
@@ -113,7 +105,7 @@ class DOMAnalyzer:
         seen_selectors = set()
         
         # Text fields (titles, prices, ratings)
-        for child in element.find_all(text=True, recursive=True):
+        for child in element.find_all(string=True, recursive=True):
             text = child.strip()
             # Allow slightly longer text for descriptions
             if 1 < len(text) < 250:

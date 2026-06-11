@@ -3,7 +3,7 @@
 ScrapeWizard is an **Agentic Web Scraper Builder**. Unlike traditional scrapers where you write selectors manually, ScrapeWizard uses AI to understand the page structure, write the code, and even fix itself if the code fails.
 
 **Two Modes:**
-- **🧙 Wizard Mode (Default)**: A clean, "UX Firewall" experience for non-technical users. It suppresses all internal engine diagnostics, технические scores, and LLM signals, focus solely on the end result.  
+- **🧙 Wizard Mode (Default)**: A clean, "UX Firewall" experience for non-technical users. It suppresses all internal engine diagnostics, technical scores, and LLM signals, focusing solely on the end result.  
 - **🔧 Expert Mode (`--expert`)**: Full technical transparency. Shows the raw engine internals, complexity/hostility scores, state transitions, and detailed LLM debug logs.
 
 This document breaks down the architecture, the logic, and the exact prompts used to build it.
@@ -122,6 +122,7 @@ This is the "Execution Protection" layer that ensures AI-generated code is robus
 ### 5. UX Philosophy: The Firewall
 "SRC owns HOW. Orchestrator owns WHEN. User owns WHAT."
 By re-introducing decision gates, we ensure the user is always in the loop for high-value decisions (format, depth, quality) while the autonomous agents handle the low-value toil (selectors, waiting, I/O).
+
 ---
 
 ## 🚀 4. How to Learn from This

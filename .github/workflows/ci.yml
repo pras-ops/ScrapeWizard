@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite (offline)
+        run: pytest tests/ -v --ignore=tests/golden_sites
+
+  fresh-install:
+    name: Fresh install (${{ matrix.os }})
+    # Verification-ladder rung 2 (PLATFORM_PLAN.md §14.4): a clean machine must be able
+    # to install from requirements.txt and import/construct the core. Catches missing
+    # dependencies (e.g. the yaspin incident) before users do.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install from requirements.txt only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import and construct core
+        shell: python
+        run: |
+          import json, tempfile
+          from pathlib import Path
+
+          import scrapewizard.cli.main  # full CLI import chain
+          from scrapewizard.core.orchestrator import Orchestrator
+
+          d = Path(tempfile.mkdtemp())
+          (d / "session.json").write_text(json.dumps(
+              {"project_id": "ci", "url": "https://example.com", "state": "INIT"}
+          ))
+          Orchestrator(d)
+          print("fresh-install check passed")
