@@ -14,8 +14,16 @@ class StudioBridge {
 
     init() {
         console.log("🛠️ DevTools Bridge Initialized");
-        this.createOverlay();
+        if (document.body) {
+            this.setupDOM();
+        } else {
+            document.addEventListener('DOMContentLoaded', () => this.setupDOM());
+        }
         this.bindEvents();
+    }
+
+    setupDOM() {
+        this.createOverlay();
         this.injectStyles();
     }
 
@@ -182,13 +190,76 @@ class StudioBridge {
     }
 
     sendToBackend(type, el) {
+        const rect = el.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Extract context (parent, siblings, ancestors, index)
+        const parent = el.parentElement;
+        const parentInfo = parent ? {
+            tag: parent.tagName.toLowerCase(),
+            classes: Array.from(parent.classList),
+            text_head: parent.innerText ? parent.innerText.substring(0, 30).trim() : ""
+        } : null;
+
+        const siblings = [];
+        let index = 0;
+        if (parent) {
+            let current = el;
+            while ((current = current.previousElementSibling) != null) {
+                index++;
+            }
+            
+            let sibCurrent = parent.firstElementChild;
+            let idx = 0;
+            while (sibCurrent) {
+                if (sibCurrent !== el && Math.abs(idx - index) <= 2) {
+                    siblings.push({
+                        tag: sibCurrent.tagName.toLowerCase(),
+                        text: sibCurrent.innerText ? sibCurrent.innerText.substring(0, 30).trim() : "",
+                        offset: idx - index
+                    });
+                }
+                sibCurrent = sibCurrent.nextElementSibling;
+                idx++;
+            }
+        }
+
+        const ancestors = [];
+        let p = el.parentElement;
+        while (p && p.tagName && p.tagName.toLowerCase() !== 'body' && p.tagName.toLowerCase() !== 'html') {
+            let str = p.tagName.toLowerCase();
+            if (p.id) str += '#' + p.id;
+            else if (p.classList.length > 0) str += '.' + Array.from(p.classList).join('.');
+            ancestors.push(str);
+            p = p.parentElement;
+        }
+
         const result = {
             type: type,
             tag: el.tagName.toLowerCase(),
             selector: this.generateBestSelector(el),
-            text: el.innerText.substring(0, 50).trim(),
-            attributes: Array.from(el.attributes).reduce((acc, a) => ({ ...acc, [a.name]: a.value }), {})
+            text: el.innerText.trim(),
+            attributes: Array.from(el.attributes).reduce((acc, a) => ({ ...acc, [a.name]: a.value }), {}),
+            geometry: {
+                x: rect.left,
+                y: rect.top,
+                w: rect.width,
+                h: rect.height,
+                viewport: [viewportWidth, viewportHeight],
+                x_pct: parseFloat((rect.left / (viewportWidth || 1)).toFixed(4)),
+                y_pct: parseFloat((rect.top / (viewportHeight || 1)).toFixed(4))
+            },
+            context: {
+                parent: parentInfo,
+                siblings: siblings,
+                ancestors: ancestors,
+                child_count: el.children.length,
+                index_in_parent: index
+            },
+            parent_html: parent ? parent.outerHTML.substring(0, 2000) : ""
         };
+
         if (window.onElementSelected) {
             window.onElementSelected(JSON.stringify(result));
         }
@@ -216,3 +287,4 @@ class StudioBridge {
 
 window.studioBridge = new StudioBridge();
 window.setStudioMode = (mode) => window.studioBridge.setMode(mode);
+

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScrapeWizard Demo Portal</title>
+    <!-- Modern Premium Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #09090b;
+            --bg-surface: #18181b;
+            --bg-card: #27272a;
+            --border-color: #3f3f46;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --brand-primary: #a78bfa;
+            --brand-hover: #c084fc;
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.15);
+            --danger: #ef4444;
+            --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: hidden;
+        }
+
+        /* Container & Glassmorphism Card styling */
+        .portal-card {
+            width: 100%;
+            max-width: 480px;
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: var(--shadow-premium);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .portal-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--brand-primary), var(--brand-hover));
+            border-radius: 16px 16px 0 0;
+        }
+
+        .dashboard-container {
+            width: 100%;
+            max-width: 900px;
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: var(--shadow-premium);
+            display: none;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Titles and Headers */
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        .header-section {
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .header-section h1 {
+            font-size: 28px;
+            background: linear-gradient(to right, var(--brand-primary), #e9d5ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .header-section p {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--brand-primary);
+            box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.2);
+        }
+
+        /* Buttons & Animations */
+        .btn-primary {
+            display: inline-block;
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--brand-primary), #8b5cf6);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        /* Dashboard UI Elements */
+        .db-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 16px;
+        }
+
+        .db-logo {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--brand-primary), #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .user-badge {
+            font-size: 12px;
+            padding: 6px 12px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            color: var(--text-secondary);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .stat-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        /* Table */
+        .products-table-container {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background-color: var(--bg-base);
+        }
+
+        .products-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        .products-table th, .products-table td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .products-table th {
+            background-color: rgba(255, 255, 255, 0.02);
+            font-weight: 500;
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .products-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Action Buttons in Table */
+        .btn-table-action {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        /* Standard styling for Checkout Button */
+        .btn-checkout {
+            background-color: var(--success);
+            color: #ffffff;
+            border: 1px solid transparent;
+        }
+
+        .btn-checkout:hover {
+            background-color: #059669;
+            transform: translateY(-1px);
+        }
+
+        /* Notification Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            background-color: var(--bg-card);
+            border-left: 4px solid var(--success);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+            z-index: 10000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* CSS for moved element container */
+        .alternative-container {
+            border: 1px dashed var(--brand-primary);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 8px;
+            background-color: rgba(167, 139, 250, 0.02);
+        }
+
+        .mutation-badge {
+            background-color: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-top: 4px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LOGIN STATE -->
+    <div id="login-section" class="portal-card">
+        <div class="header-section">
+            <h1>ScrapeWizard Demo</h1>
+            <p>Enter credentials to access your console</p>
+        </div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" class="input-field" placeholder="admin@scrapewizard.local" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" class="input-field" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+            <button type="submit" id="login-submit-btn" class="btn-primary">Sign In</button>
+        </form>
+    </div>
+
+    <!-- DASHBOARD STATE -->
+    <div id="dashboard-section" class="dashboard-container">
+        <div class="db-header">
+            <span class="db-logo">ScrapeWizard Studio Demo</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span class="user-badge" id="user-badge-name">User: admin</span>
+                <button onclick="handleLogout()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 13px;">Logout</button>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-label">API Status</span>
+                <span class="stat-value" style="color: var(--success);">Online</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Test Runs</span>
+                <span class="stat-value">25</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">System Health</span>
+                <span class="stat-value">98.4%</span>
+            </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+            <h2 style="font-size: 18px;">Automated Test Fixtures</h2>
+            <div>
+                <input type="text" id="search-input" class="input-field" placeholder="Search components..." style="width: 220px; padding: 8px 12px; font-size: 13px;">
+            </div>
+        </div>
+
+        <div class="products-table-container">
+            <table class="products-table">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>AI Co-Pilot Optimizer</strong></td>
+                        <td><span style="color: var(--success);">Active</span></td>
+                        <td>Core Engine</td>
+                        <td id="action-cell-1">
+                            <!-- Target element for E2E and healing -->
+                            <button id="checkout-btn" class="btn-table-action btn-checkout" data-testid="checkout-trigger" role="button">Checkout</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Cloud Parallel Runner</strong></td>
+                        <td><span style="color: var(--success);">Active</span></td>
+                        <td>Infrastructure</td>
+                        <td>
+                            <button id="runner-details-btn" class="btn-table-action" style="background-color: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color);">View Details</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Self-Healing Selector</strong></td>
+                        <td><span style="color: var(--text-secondary);">Idle</span></td>
+                        <td>Tuning</td>
+                        <td>
+                            <button id="tune-btn" class="btn-table-action" style="background-color: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color);">Configure</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="mutation-info" style="display: none;">
+            <div class="mutation-badge" id="mutation-label">Mutation active: None</div>
+        </div>
+        
+        <!-- Target container for element_moved mutation -->
+        <div id="alternative-target-container" class="alternative-container" style="display: none;">
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Healed Container Context</div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast-notification" class="toast">
+        Checkout successful! Order created.
+    </div>
+
+    <script>
+        // Check local storage or login state
+        if (localStorage.getItem("sw_logged_in") === "true") {
+            showDashboard();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            try {
+                const res = await fetch("/api/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                if (res.ok) {
+                    localStorage.setItem("sw_logged_in", "true");
+                    localStorage.setItem("sw_username", username);
+                    showDashboard();
+                } else {
+                    alert("Invalid login credentials.");
+                }
+            } catch (err) {
+                console.error("Login request failed", err);
+                // Fallback for offline usage
+                localStorage.setItem("sw_logged_in", "true");
+                localStorage.setItem("sw_username", username);
+                showDashboard();
+            }
+        }
+
+        function showDashboard() {
+            document.getElementById("login-section").style.display = "none";
+            const dbSection = document.getElementById("dashboard-section");
+            dbSection.style.display = "flex";
+            
+            const username = localStorage.getItem("sw_username") || "admin";
+            document.getElementById("user-badge-name").innerText = "User: " + username;
+
+            applyMutations();
+            
+            // Re-bind click handler on checkout button (after mutations have completed)
+            const checkoutBtn = document.querySelector("#checkout-btn, .btn-checkout, #order-btn-xyz");
+            if (checkoutBtn) {
+                checkoutBtn.addEventListener('click', handleCheckout);
+            }
+        }
+
+        function handleLogout() {
+            localStorage.removeItem("sw_logged_in");
+            localStorage.removeItem("sw_username");
+            document.getElementById("dashboard-section").style.display = "none";
+            document.getElementById("login-section").style.display = "flex";
+        }
+
+        async function handleCheckout(e) {
+            e.preventDefault();
+            try {
+                const res = await fetch("/api/checkout", { method: "POST" });
+                if (res.ok) {
+                    showToast();
+                }
+            } catch (err) {
+                // Fallback for offline testing
+                showToast();
+            }
+        }
+
+        function showToast() {
+            const toast = document.getElementById("toast-notification");
+            toast.classList.add("show");
+            setTimeout(() => {
+                toast.classList.remove("show");
+            }, 3000);
+        }
+
+        function applyMutations() {
+            const params = new URLSearchParams(window.location.search);
+            const mutation = params.get('mutate');
+            
+            const btn = document.getElementById("checkout-btn");
+            if (!btn) return;
+
+            if (mutation) {
+                document.getElementById("mutation-info").style.display = "block";
+                document.getElementById("mutation-label").innerText = "Mutation active: " + mutation;
+            }
+
+            switch(mutation) {
+                case 'class_rename':
+                    // 1. Class renamed: Remove old class, add new suffix
+                    btn.classList.remove("btn-checkout");
+                    btn.classList.add("btn-mutated-xyz");
+                    break;
+                    
+                case 'id_change':
+                    // 2. ID removed / changed
+                    btn.removeAttribute("id");
+                    btn.setAttribute("id", "order-btn-xyz");
+                    break;
+                    
+                case 'element_moved':
+                    // 3. Element moved to a new parent container
+                    const altContainer = document.getElementById("alternative-target-container");
+                    altContainer.style.display = "block";
+                    altContainer.appendChild(btn);
+                    break;
+                    
+                case 'text_reword':
+                    // 4. Text reworded
+                    btn.innerText = "Order Now";
+                    break;
+                    
+                case 'insert_sibling':
+                    // 5. Sibling inserted: Insert a decoy button directly before our checkout button
+                    const decoy = document.createElement("button");
+                    decoy.className = "btn-table-action";
+                    decoy.style.backgroundColor = "var(--bg-card)";
+                    decoy.style.border = "1px solid var(--border-color)";
+                    decoy.style.color = "var(--text-secondary)";
+                    decoy.style.marginRight = "6px";
+                    decoy.innerText = "Cancel Pending";
+                    decoy.id = "cancel-btn";
+                    btn.parentNode.insertBefore(decoy, btn);
+                    break;
+                    
+                case 'attribute_changed':
+                    // 6. Attribute changed
+                    btn.setAttribute("data-testid", "checkout-order-submit");
+                    btn.setAttribute("role", "submit-btn");
+                    break;
+                    
+                case 'element_removed':
+                    // 7. Element removed entirely (for testing failures or tier 6 recovery)
+                    btn.remove();
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>
