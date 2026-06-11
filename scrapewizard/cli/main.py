@@ -27,6 +27,7 @@ app.command(name="list")(utils.list_projects)
 app.command()(utils.clean)
 app.command()(utils.doctor)
 app.command()(utils.resume)
+app.command(name="start")(utils.start_studio)
 app.command(name="record")(engine.record)
 app.command(name="test")(engine.test)
 

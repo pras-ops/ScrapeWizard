@@ -123,5 +123,40 @@ def resume(project_id: str = typer.Argument(..., help="The ID of the project to 
         orchestrator = Orchestrator(project_dir)
         orchestrator.run()
     except Exception as e:
-        rprint(f"[red]Resume failed: {e}[/red]")
+        log(f"Resume failed: {e}", level="error")
         raise typer.Exit(code=1)
+
+def start_studio(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to run the studio server on"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open ScrapeWizard Studio in the default browser")
+) -> None:
+    """Start ScrapeWizard Studio web interface."""
+    import uvicorn
+    import webbrowser
+    import threading
+    import time
+    from studio.backend.db import init_db
+    
+    rprint("[bold cyan]Starting ScrapeWizard Studio...[/bold cyan]")
+    
+    # Initialize DB before booting
+    init_db()
+    
+    url = f"http://127.0.0.1:{port}"
+    rprint(f"• Studio is running at: [bold green]{url}[/bold green]")
+    rprint("• Press [bold yellow]Ctrl+C[/bold yellow] to stop the server.")
+    
+    if open_browser:
+        def open_url():
+            time.sleep(1.5)
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        threading.Thread(target=open_url, daemon=True).start()
+        
+    try:
+        from studio.backend.main import app as fastapi_app
+        uvicorn.run(fastapi_app, host="127.0.0.1", port=port, log_level="error")
+    except KeyboardInterrupt:
+        rprint("\n[yellow]Studio server stopped.[/yellow]")

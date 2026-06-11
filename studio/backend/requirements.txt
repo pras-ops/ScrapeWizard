@@ -5,3 +5,4 @@ rich
 pydantic
 python-dotenv
 aiohttp
+sqlmodel

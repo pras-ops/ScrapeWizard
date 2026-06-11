@@ -152,6 +152,8 @@ The CLI scraper documented above remains the current, working product.
 
 - **[PLATFORM_PLAN.md](PLATFORM_PLAN.md)** — the full roadmap and architecture (source of truth)
 - **[BUILD_GUIDE.md](BUILD_GUIDE.md)** — step-by-step how-to for building each stage
+- **[FRONTEND_PLAN.md](FRONTEND_PLAN.md)** — detailed spec for the application (the GUI/portal)
+- **[APP_BUILD_STEPS.md](APP_BUILD_STEPS.md)** — step-by-step build order: backend API + SQLite, then frontend slices
 
 ## License
 MIT

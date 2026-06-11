@@ -30,7 +30,8 @@ dependencies = [
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "python-json-logger>=2.0.0",
-    "yaspin>=2.0.0"
+    "yaspin>=2.0.0",
+    "sqlmodel"
 ]
 
 [project.scripts]

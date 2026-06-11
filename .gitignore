@@ -36,6 +36,11 @@ cookies.json
 storage_state.json
 .learn.md
 
+# SQLite databases (runtime artifacts — never commit)
+*.db
+*.db-shm
+*.db-wal
+
 # Testing
 .pytest_cache/
 .coverage
@@ -51,6 +56,8 @@ htmlcov/
 # OS
 .DS_Store
 ScrapeWizard Studio
-/studio
 .learn.md
 
+# Frontend build output (generated — not committed)
+studio/frontend/dist/
+studio/frontend/node_modules/
