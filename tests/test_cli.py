@@ -31,3 +31,13 @@ def test_bridge_test_help():
     result = runner.invoke(bridge_app, ["test", "--help"])
     assert result.exit_code == 0
     assert "PROJECT" in result.output
+
+def test_cli_record_help():
+    result = runner.invoke(app, ["record", "--help"])
+    assert result.exit_code == 0
+    assert "--url" in result.output
+
+def test_cli_test_help():
+    result = runner.invoke(app, ["test", "--help"])
+    assert result.exit_code == 0
+    assert "FLOW_PATH" in result.output
