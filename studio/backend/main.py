@@ -35,9 +35,16 @@ app.include_router(settings_router)
 app.include_router(tests_router)
 app.include_router(runs_router)
 
+from scrapewizard.core.config import ConfigManager
+
 # Mount artifacts folder to serve screenshots and visual diff crops
 STUDIO_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/artifacts", StaticFiles(directory=str(STUDIO_ARTIFACTS_DIR)), name="artifacts")
+
+# Mount projects folder to serve recorded step crop screenshots
+projects_dir = ConfigManager.CONFIG_DIR / "projects"
+projects_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/projects", StaticFiles(directory=str(projects_dir)), name="projects")
 
 # Mount React static frontend dist output (prod bundle)
 frontend_dist = Path(__file__).parent / ".." / "frontend" / "dist"

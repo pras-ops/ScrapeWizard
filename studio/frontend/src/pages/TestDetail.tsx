@@ -14,6 +14,7 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadTest() {
@@ -34,11 +35,12 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
   const handleSave = async () => {
     try {
       setSaving(true);
+      setActionError(null);
       const res = await api.updateTest(testId, { steps });
       setBanner(res.message);
       setTimeout(() => setBanner(null), 3000);
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      setActionError(`Save failed: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -46,10 +48,11 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
 
   const handleRun = async () => {
     try {
+      setActionError(null);
       const res = await api.triggerRun(testId);
       onNavigate(`/runs/${res.run_id}`);
     } catch (err: any) {
-      alert(`Run trigger failed: ${err.message}`);
+      setActionError(`Run trigger failed: ${err.message}`);
     }
   };
 
@@ -192,6 +195,12 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
         </div>
       )}
 
+      {actionError && (
+        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-lg text-sm font-medium">
+          {actionError}
+        </div>
+      )}
+
       {steps.length === 0 ? (
         <div className="p-12 text-center bg-slate-850 border border-slate-750 rounded-xl">
           <p className="text-slate-400">This test contains no steps. Record steps to populate the flow.</p>
@@ -301,9 +310,24 @@ export default function TestDetail({ testId, onNavigate }: TestDetailProps) {
               {/* Crop Screenshot Thumb */}
               {step.fingerprint && step.fingerprint.tag && (
                 <div className="md:w-48 flex flex-col justify-between items-end border-l border-slate-750 md:pl-6 pt-4 md:pt-0">
-                  <div className="w-full text-right text-xs text-slate-500 space-y-1">
-                    <p className="font-semibold text-slate-400">&lt;{step.fingerprint.tag}&gt;</p>
-                    {step.fingerprint.text && <p className="italic truncate font-mono">"{step.fingerprint.text}"</p>}
+                  <div className="w-full space-y-3">
+                    <div className="text-right text-xs text-slate-500 space-y-1">
+                      <p className="font-semibold text-slate-400">&lt;{step.fingerprint.tag}&gt;</p>
+                      {step.fingerprint.text && <p className="italic truncate font-mono">"{step.fingerprint.text}"</p>}
+                    </div>
+                    
+                    <div className="border border-slate-750 rounded-lg overflow-hidden bg-slate-900/60 p-1 flex items-center justify-center h-20 w-full">
+                      <img
+                        src={step.fingerprint.screenshot_path || `/projects/test_${testId}/screenshots/crop_${step.order - 1}.png`}
+                        alt="Element crop"
+                        className="max-h-full max-w-full object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                          const parent = (e.target as HTMLElement).parentElement;
+                          if (parent) parent.style.display = 'none';
+                        }}
+                      />
+                    </div>
                   </div>
                   
                   <div className="flex gap-2 mt-4 md:mt-0">

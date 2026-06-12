@@ -8,6 +8,10 @@
   --color-surface-dark: #192233;
   --color-text-muted: #92a4c9;
 
+  --color-slate-650: #3b4b61;
+  --color-slate-750: #273549;
+  --color-slate-850: #172237;
+
   --font-display: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
@@ -17,9 +21,9 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #f6f6f8;
+  color-scheme: dark;
+  color: #f8fafc;
+  background-color: #101622;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -27,8 +31,8 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-.dark :root {
-  background-color: #101622;
+.display-font {
+  font-family: var(--font-display);
 }
 
 body {

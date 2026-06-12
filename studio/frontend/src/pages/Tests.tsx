@@ -37,7 +37,7 @@ export default function Tests({ onNavigate }: TestsProps) {
       await api.deleteTest(id);
       setTests(tests.filter(t => t.id !== id));
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      setError(`Delete failed: ${err.message}`);
     }
   };
 
@@ -47,7 +47,7 @@ export default function Tests({ onNavigate }: TestsProps) {
       const res = await api.triggerRun(id);
       onNavigate(`/runs/${res.run_id}`);
     } catch (err: any) {
-      alert(`Execution run failed: ${err.message}`);
+      setError(`Execution run failed: ${err.message}`);
     }
   };
 

@@ -60,10 +60,10 @@ async def run_recorder_flow(test_id: int, recorder: InteractiveRecorder, url: st
                         db.delete(s)
                     
                     for idx, s in enumerate(test_def["steps"]):
-                        # Locate corresponding fingerprint from recorder steps (index - 1 since first is navigate)
                         fp = {}
                         if idx > 0 and (idx - 1) < len(recorder.steps):
-                            fp = recorder.steps[idx - 1].get("fingerprint", {})
+                            fp = dict(recorder.steps[idx - 1].get("fingerprint", {}))
+                            fp["screenshot_path"] = f"/projects/test_{test_id}/screenshots/crop_{idx - 1}.png"
                         
                         db_step = Step(
                             test_id=test_id,
@@ -239,6 +239,7 @@ def record_status(id: int):
     state = recording_states.get(id, {"recording": False, "step_count": 0})
     return state
 
+@router.get("/{id}/export")
 @router.post("/{id}/export")
 def export_pytest(id: int, db: Session = Depends(get_session)):
     """Build and download a runnable standalone Playwright/pytest test script."""
