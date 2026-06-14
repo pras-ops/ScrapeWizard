@@ -12,6 +12,13 @@
   --color-slate-750: #273549;
   --color-slate-850: #172237;
 
+  --color-pass: #10b981;
+  --color-fail: #ef4444;
+  --color-warn: #f59e0b;
+  --color-run: #3b82f6;
+  --color-surface: #192233;
+  --color-edge: #324467;
+
   --font-display: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
@@ -59,4 +66,19 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #4a5d85;
+}
+
+@keyframes slide-in-up {
+  from {
+    transform: translateY(1rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-up {
+  animation: slide-in-up 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

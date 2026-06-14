@@ -212,9 +212,12 @@ async def capture_from_page(page, element_handle, screenshot_path: Optional[str]
             log(f"Element screenshot failed: {e}", level="warning")
         
     # Navigation context
+    frame_url = page.url
+    page_obj = getattr(page, "page", page)
+    page_title = await page_obj.title() if page_obj else ""
     navigation_data = {
-        "url": page.url,
-        "title": await page.title()
+        "url": frame_url,
+        "title": page_title
     }
     
     data = {

@@ -42,7 +42,18 @@ class InteractiveRecorder:
                     log(f"Warning: {w}", level="warning")
                     print(f"⚠️  {w}")
 
-                el = await self.page.query_selector(f"[data-sw-temp-id='{temp_id}']")
+                # Search for the element across all frames to support iframes
+                el = None
+                target_frame = self.page
+                for frame in self.page.frames:
+                    try:
+                        el = await frame.query_selector(f"[data-sw-temp-id='{temp_id}']")
+                        if el:
+                            target_frame = frame
+                            break
+                    except Exception:
+                        pass
+                
                 if not el:
                     log("Could not resolve element for fingerprinting", level="warning")
                     return
@@ -53,7 +64,7 @@ class InteractiveRecorder:
                 
                 try:
                     # Capture fingerprint & crop screenshot of the element
-                    fingerprint = await capture_from_page(self.page, el, screenshot_path=str(screenshot_path))
+                    fingerprint = await capture_from_page(target_frame, el, screenshot_path=str(screenshot_path))
                     # Remove temp id attribute
                     await el.evaluate("el => el.removeAttribute('data-sw-temp-id')")
                 except Exception as e:
@@ -64,6 +75,8 @@ class InteractiveRecorder:
                 recorded_value = value
                 if fingerprint.attributes.get("type") == "password":
                     recorded_value = "***MASKED***"
+                    if "value" in fingerprint.attributes:
+                        fingerprint.attributes["value"] = "***MASKED***"
                 
                 # Primary selector
                 primary_selector = fingerprint.selectors[0]["value"] if fingerprint.selectors else ""

@@ -8,6 +8,7 @@ from playwright.async_api import async_playwright
 
 from scrapewizard.core.logging import log
 from scrapewizard.engine.checks import ConsoleNetworkTracker, perform_visual_check, perform_a11y_check
+from scrapewizard.engine.healing import attempt_self_healing
 
 @dataclass
 class StepResult:
@@ -123,6 +124,7 @@ class SandboxRunner:
                 
                 step_start = time.time()
                 status = "passed"
+                healed = False
                 error_msg = None
                 
                 log(f"Sandbox executing step: {step_name} ({action})")
@@ -134,12 +136,20 @@ class SandboxRunner:
                     elif action == "click":
                         el = await resolve_element(page, selectors)
                         if not el:
-                            raise Exception(f"Failed to resolve element for click using ladder: {selectors}")
+                            # Attempt self-healing
+                            el = await attempt_self_healing(page, step.get("fingerprint"))
+                            if not el:
+                                raise Exception(f"Failed to resolve element for click using ladder and self-healing: {selectors}")
+                            healed = True
                         await el.click()
                     elif action == "fill":
                         el = await resolve_element(page, selectors)
                         if not el:
-                            raise Exception(f"Failed to resolve element for fill using ladder: {selectors}")
+                            # Attempt self-healing
+                            el = await attempt_self_healing(page, step.get("fingerprint"))
+                            if not el:
+                                raise Exception(f"Failed to resolve element for fill using ladder and self-healing: {selectors}")
+                            healed = True
                         await el.fill(value)
                     else:
                         raise Exception(f"Unsupported action: {action}")
@@ -158,7 +168,13 @@ class SandboxRunner:
                             # Resolve target or check assertion value as CSS
                             target_selectors = selectors if selectors else [{"kind": "css", "value": expected}]
                             el = await resolve_element(page, target_selectors)
-                            assert el and await el.is_visible(), f"Assertion failed: element {expected} is not visible"
+                            if not el:
+                                # Attempt self-healing for visible assertion
+                                el = await attempt_self_healing(page, step.get("fingerprint"))
+                                if not el:
+                                    raise AssertionError(f"Assertion failed: element {expected} is not visible and could not be healed")
+                                healed = True
+                            assert await el.is_visible(), f"Assertion failed: element {expected} is not visible"
 
                 except Exception as e:
                     status = "failed"
@@ -202,6 +218,7 @@ class SandboxRunner:
                     console_errors=console_errors,
                     network_errors=network_errors,
                     a11y_violations=a11y_violations,
+                    healed=healed,
                     error_message=error_msg
                 ))
                 

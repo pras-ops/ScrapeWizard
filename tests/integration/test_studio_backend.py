@@ -9,22 +9,17 @@ from studio.backend.models import Setting, Test, Step, Run, StepResult
 import os
 from pathlib import Path
 
-DB_FILE = Path("test_studio.db")
+from sqlalchemy.pool import StaticPool
+
 test_engine = create_engine(
-    f"sqlite:///{DB_FILE}",
-    connect_args={"check_same_thread": False}
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool
 )
 
 @pytest.fixture(name="db_session")
 def db_session_fixture():
-    """Create a temporary SQLite DB file for routing tests and clean it up."""
-    # Ensure any stale file is removed
-    if DB_FILE.exists():
-        try:
-            os.remove(DB_FILE)
-        except Exception:
-            pass
-            
+    """Create an in-memory SQLite DB session for routing tests."""
     SQLModel.metadata.create_all(test_engine)
     with Session(test_engine) as session:
         # Truncate tables for test isolation
@@ -36,19 +31,12 @@ def db_session_fixture():
                 pass
         session.commit()
         
-        # Seed version robustly (avoids UNIQUE constraint error if file is locked)
+        # Seed version robustly
         existing = session.get(Setting, "schema_version")
         if not existing:
             session.add(Setting(key="schema_version", value="1.2.0"))
             session.commit()
         yield session
-        
-    # Teardown
-    if DB_FILE.exists():
-        try:
-            os.remove(DB_FILE)
-        except Exception:
-            pass
 
 @pytest.fixture(name="client")
 def client_fixture(db_session):

@@ -1,160 +1,136 @@
-# 🧙 ScrapeWizard – MVP1
+# 🧙 ScrapeWizard
 
-**AI-Assisted Scraper Builder for Developers**
+**Agentic Web Scraper Builder & Self-Healing Automation Studio**
 
-ScrapeWizard is an **AI-powered scraper generator** designed to help developers build reliable Playwright scrapers in minutes. It follows a clear principle: **“AI helps you BUILD scrapers – it does NOT run them.”**
+ScrapeWizard is a professional, developer-first platform for building, running, and maintaining reliable web scrapers. By combining high-fidelity browser recording with an offline, multi-tier self-healing engine, ScrapeWizard ensures your scrapers survive target site markup changes and structural mutations without manual code updates.
 
-## 🟢 What ScrapeWizard Is Today (v1.2.0)
+> [!IMPORTANT]
+> **Key Philosophy:** AI helps you *build* and *heal* scrapers—it does *not* execute arbitrary LLM calls during hot paths, ensuring high performance, zero runtime LLM costs, and 100% deterministic scraper execution.
 
-ScrapeWizard MVP1 is a professional developer tool for rapidly generating maintainable, standalone scrapers.
+---
 
-### Core Capabilities:
-- ✅ **Interactive CLI Builder**: Guided process from URL to code.
-- ✅ **AI Analysis**: Automatic structure, pattern, and field detection.
-- ✅ **Multiple LLM Support**: Choose between OpenAI, Anthropic, OpenRouter, or Local (Ollama) providers.
-- ✅ **AI Cost Transparency**: Real-time token tracking and cost estimation for every build.
-- ✅ **Smart Assessment**: Pre-flight checks for anti-bot measures.
-- **Unified Decision Gates (v1.1)**: Critical checkpoints where the user owns the "WHAT" while the AI handles the "HOW":
-    - **Gate 1: Output Format**: Choose CSV, Excel, or JSON upfront.
-    - **Gate 2: Pagination Scope**: Define scrape depth (Single page, 5-page limit, or all pages).
-    - **Gate 3: Data Quality Firewall**: Monitors extraction results; if missing data is detected, it triggers a recovery loop.
-- **Interactive Recovery**: Never get stuck. If a run fails, choose:
-    - 🩺 **Auto-Repair**: AI fixes specific selectors for missing fields.
-    - 🔄 **Full Retry**: Re-generate the entire strategy from scratch.
-- **Scraper Runtime Contract (SRC)**: AI implementation of specific classes only. Infrastructure (Browser, Pagination loop, I/O) is owned by the ScrapeWizard SDK, eliminating hallucinations.
-- **Dynamic Waiting**: Automatic handling of hydration delays via `smart_wait()`.
-- **Hardening & Portability**: Content-based hashing for deduplication and detailed debug logs indicating exactly why any items were skipped.
+## 🚀 Key Features
 
-## Installation
+*   **⚡ ScrapeWizard Studio Dashboard:** A premium, local-first web interface built with React, Tailwind, React Query, and Zustand. Monitor scrape jobs, view run histories, inspect visual diff crops, and review healed steps.
+*   **🩺 Multi-Tier Offline Self-Healing:** When site markup breaks, our local engine attempts to heal the broken locator automatically using 5 deterministic similarity tiers (attributes, tag structure, geometry, and parent-child hierarchy) before resorting to AI repairs.
+*   **📹 High-Fidelity Recorder:** Interactive recording page featuring full support for frames/iframes, multi-page flows, and automated password-masking (secrets are masked at capture time inside step files and logs).
+*   **📊 Unified Decision Gates:** Control scraper behavior upfront through interactive steps:
+    *   *Gate 1: Output Format* — Export results directly to CSV, Excel (XLSX), or JSON.
+    *   *Gate 2: Pagination Scope* — Control traversal depth (Single page, page limits, or complete crawls).
+    *   *Gate 3: Data Quality Firewall* — Monitors extraction output and triggers local self-healing or LLM repair loops if fields become empty.
+*   **📦 Zero-Dependency Execution:** Easily packaged as a standard Python wheel containing the bundled frontend. No Node.js runtime is required for end-users.
+
+---
+
+## 🛠️ Installation
 
 ```bash
-pip install -r requirements.txt
+# Install the ScrapeWizard package
+pip install scrapewizard
+
+# Install Playwright browser dependencies
 playwright install chromium
 
-# Linux Only: Install system dependencies
+# Linux/CI environments only:
 playwright install-deps
-
-# Optional: only needed if you use the Anthropic provider
-pip install anthropic
-```
-
-## Commands & Examples
-
-### 1. `login` - Secure API Key Storage
-Store your AI providers' API key safely in your system's keyring. No plain text storage.
-```bash
-scrapewizard login "sk-or-v1-xyz..."
-```
-
-### 2. `setup` - Configuration
-Initial setup to configure your LLM provider and default model.
-```bash
-scrapewizard setup
-```
-
-### 3. `build` - Create a Scraper
-The main command to start a new scraping project.
-
-**Zero-Click Mode (Default - "Just Works"):**
-```bash
-# Provide URL - ScrapeWizard guides you through simplified format and pagination gates
-scrapewizard build --url "https://books.toscrape.com"
-```
-
-**Ad-hoc AI Override:**
-```bash
-# Specify provider and model for a single build session
-scrapewizard build --url "https://books.toscrape.com" \
-                   --ai-provider anthropic \
-                   --ai-model claude-3-5-sonnet-20240620
-```
-
-**Interactive Mode (Custom Control):**
-```bash
-# Ask me "One Smart Question" about fields or format
-scrapewizard build --url "https://books.toscrape.com" --interactive
-```
-
-**Expert Mode (Full Technical Output):**
-```bash
-# Shows debug logs, state transitions, LLM warnings, and repair loops
-scrapewizard build --url "https://books.toscrape.com" --expert
-```
-
-### 4. `list` - View Projects
-List all previously created scraper projects.
-```bash
-scrapewizard list
-```
-
-### 5. `resume` - Continue Work
-Resume a project that was stopped or failed.
-```bash
-scrapewizard resume "PROJECT_ID"
-```
-
-### 6. `doctor` - Health Check
-Verify your environment, dependencies, and LLM connectivity.
-```bash
-scrapewizard doctor
-```
-
-### 7. `clean` - Cleanup
-Remove temporary files or old projects to save space.
-```bash
-scrapewizard clean
-```
-
-### 8. `version` - Version Info
-Check the current version of ScrapeWizard.
-```bash
-scrapewizard version
 ```
 
 ---
 
-## ⚙️ Configuration
+## 💻 CLI Commands
 
-### Global Config
-Stored in `~/.scrapewizard/config.json`. Managed via the `setup` command.
-
-### Local Config Overrides
-You can now override global settings (model, provider, etc.) on a per-project basis using a `.scrapewizardrc` file in your project root.
-
-```json
-{
-  "model": "gpt-4-local-override",
-  "provider": "openai"
-}
-```
-
-## 🏗️ Project Output
-
-Projects are saved in `~/scrapewizard_projects/`.
-Each project contains a self-contained `output/` folder:
-- `generated_scraper.py`: The ScrapeWizard Scraper Plugin (subclasses `BaseScraper`).
-- `storage_state.json`: Full session state (Cookies + LocalStorage) for manual bypass/login.
-- `data.json` / `data.csv` / `data.xlsx`: Your scraped records (cleaned and filtered).
-- `analysis_snapshot.json`: The raw DOM analysis used by the AI.
-- `llm_logs/`: Raw AI responses for deep debugging and transparency.
-
-## Golden Test Suite
-To verify the system integrity, run the automated golden tests:
+### 1. `start` - Launch ScrapeWizard Studio
+Boots up the FastAPI backend, initializes the database, and launches the React frontend dashboard in your default browser.
 ```bash
-python tests/golden_sites/books.py
+scrapewizard start --port 8000
 ```
 
-## 🔭 Project Direction
+### 2. `login` - Secure Provider Keys
+Securely saves your LLM provider keys (OpenAI, Anthropic, OpenRouter, or Ollama) using your system's secure keyring.
+```bash
+scrapewizard login "sk-or-v1-xyz..."
+```
 
-ScrapeWizard is evolving from a CLI scraper builder into a **local-first UI/UX test automation
-platform** (record once → self-healing tests → admin portal), built on the same engine.
-The CLI scraper documented above remains the current, working product.
+### 3. `setup` - Configure Global Defaults
+Configures default LLM providers, active models, and workspace settings.
+```bash
+scrapewizard setup
+```
 
-- **[PLATFORM_PLAN.md](PLATFORM_PLAN.md)** — the full roadmap and architecture (source of truth)
-- **[BUILD_GUIDE.md](BUILD_GUIDE.md)** — step-by-step how-to for building each stage
-- **[FRONTEND_PLAN.md](FRONTEND_PLAN.md)** — detailed spec for the application (the GUI/portal)
-- **[APP_BUILD_STEPS.md](APP_BUILD_STEPS.md)** — step-by-step build order: backend API + SQLite, then frontend slices
-- **[MARKET_READY_PLAN.md](MARKET_READY_PLAN.md)** — final-mile plan: fix all audited issues, reach market standard, package & deploy
+### 4. `build` - Generate a Scraper
+Starts a new scraping project from a target URL.
+```bash
+# Guided build using default settings
+scrapewizard build --url "https://books.toscrape.com"
 
-## License
-MIT
+# Expert Mode: Shows debug logs, database states, and raw model logs
+scrapewizard build --url "https://books.toscrape.com" --expert
+
+# Interactive Mode: Ask smart clarification questions about formatting/fields
+scrapewizard build --url "https://books.toscrape.com" --interactive
+```
+
+### 5. `list` - View Local Projects
+Lists all active scraping projects, URLs, execution states, and last modified times.
+```bash
+scrapewizard list
+```
+
+### 6. `resume` - Continue Scraper Builder
+Resumes a guide or scraper generation run that was interrupted.
+```bash
+scrapewizard resume "<PROJECT_ID>"
+```
+
+### 7. `doctor` - Environment Diagnostics
+Checks Python/OS versions, configuration files, Playwright installations, and validates LLM connection health.
+```bash
+scrapewizard doctor
+```
+
+### 8. `clean` - Cleanup Temporary Workspace
+Purges cached test runs and deleted project files to free up disk space.
+```bash
+scrapewizard clean
+```
+
+---
+
+## ⚙️ The Self-Healing Hierarchy (Tiers 0-5)
+
+When a web element mutated (e.g. classes renamed, layout shifted, attributes altered), the ScrapeWizard engine steps through a deterministic self-healing hierarchy to re-identify the element offline:
+
+1.  **Tier 0 (Direct Match):** Evaluates the primary selector.
+2.  **Tier 1 (Selector Ladder):** Tries fallback CSS selectors recorded during fingerprinting.
+3.  **Tier 2 (Attribute & Text Score):** Computes text content and property matching similarity.
+4.  **Tier 3 (Structural Matching):** Evaluates parent/sibling tag relationships.
+5.  **Tier 4 (Geometry & Visuals):** Compares coordinates, dimensions, and visual bounds.
+6.  **Tier 5 (Navigation Context):** Analyzes step sequence history to infer the correct element.
+7.  **Tier 6 (LLM Recovery - Opt-in):** Triggers only if offline tiers fail to find a match above the confidence margin.
+
+> [!TIP]
+> To prevent wrong-element matches, the self-healing system requires a strict scoring margin threshold (0.10) between the top match and secondary candidates. Heals are only persisted if the full re-run passes green.
+
+---
+
+## 🏗️ Project Output Structure
+
+Every project created is saved in `~/.scrapewizard/projects/<PROJECT_ID>/` containing:
+*   `generated_scraper.py` — The final executable scraper plugin subclassing `BaseScraper`.
+*   `storage_state.json` — Cookies and local storage snapshot to bypass logins.
+*   `data.json` / `data.csv` — Scraped structured datasets.
+*   `analysis_snapshot.json` — Pre-flight DOM audit.
+*   `llm_logs/` — Trace of raw AI prompts and responses for debug audit.
+
+---
+
+## 🧪 Golden Test Suite
+Verify local setup and self-healing rate by running:
+```bash
+python3 -m pytest tests/ -v --ignore=tests/golden_sites
+```
+
+---
+
+## 📄 License
+MIT License

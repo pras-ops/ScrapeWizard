@@ -1,6 +1,7 @@
 import ast
 import json
 import subprocess
+import sys
 import pytest
 from pathlib import Path
 from scrapewizard.engine.test_generator import TestGenerator
@@ -116,7 +117,7 @@ async def test_generated_file_execution(demo_server, tmp_path):
     # 3. Run the generated test file using subprocess calling the Python 3.12 pytest
     # We use -v and -s to print outputs
     res = subprocess.run(
-        ["C:\\Python312\\python.exe", "-m", "pytest", str(generated_py), "-v"],
+        [sys.executable, "-m", "pytest", str(generated_py), "-v"],
         capture_output=True,
         text=True
     )

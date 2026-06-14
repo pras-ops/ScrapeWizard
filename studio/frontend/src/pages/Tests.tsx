@@ -1,174 +1,175 @@
-import React, { useEffect, useState } from 'react';
-import { api, TestData } from '../lib/api';
-import { Play, Trash2, Eye, Plus, ArrowRight, ShieldAlert, CheckCircle, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useTests, useDeleteTest, useTriggerRun } from '../hooks/useApi';
+import { Button, Card, CardContent, PageHeader, ErrorState, ConfirmDialog, toast, StatusPill } from '../components/ui';
+import { Play, Trash2, Eye, Plus, ShieldAlert, CheckCircle } from 'lucide-react';
 
-interface TestsProps {
-  onNavigate: (route: string) => void;
-}
+export default function Tests() {
+  const navigate = useNavigate();
+  const { data: tests, isLoading, error, refetch } = useTests();
+  const deleteMutation = useDeleteTest();
+  const triggerRunMutation = useTriggerRun();
 
-export default function Tests({ onNavigate }: TestsProps) {
-  const [tests, setTests] = useState<TestData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [testToDelete, setTestToDelete] = useState<number | null>(null);
 
-  const loadTests = async () => {
-    try {
-      setLoading(true);
-      const data = await api.listTests();
-      setTests(data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load test suite.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTests();
-  }, []);
-
-  const handleDelete = async (e: React.MouseEvent, id: number) => {
-    e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this test? All step and execution records will be lost.')) {
-      return;
-    }
-    try {
-      await api.deleteTest(id);
-      setTests(tests.filter(t => t.id !== id));
-    } catch (err: any) {
-      setError(`Delete failed: ${err.message}`);
+  const confirmDelete = async () => {
+    if (testToDelete !== null) {
+      try {
+        await deleteMutation.mutateAsync(testToDelete);
+        toast.success('Test deleted successfully.');
+      } catch (err: any) {
+        toast.error(err.message || 'Failed to delete test.');
+      } finally {
+        setTestToDelete(null);
+      }
     }
   };
 
   const handleRun = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     try {
-      const res = await api.triggerRun(id);
-      onNavigate(`/runs/${res.run_id}`);
+      const res = await triggerRunMutation.mutateAsync(id);
+      toast.success('Execution run started.');
+      navigate(`/runs/${res.run_id}`);
     } catch (err: any) {
-      setError(`Execution run failed: ${err.message}`);
+      toast.error(err.message || 'Failed to trigger run.');
     }
   };
 
-  if (loading && tests.length === 0) {
+  if (isLoading) {
     return (
-      <div className="p-8 space-y-6 w-full animate-pulse">
+      <div className="p-8 space-y-6 w-full max-w-6xl mx-auto">
         <div className="flex justify-between items-center">
-          <div className="h-10 w-48 bg-slate-700/50 rounded-lg"></div>
-          <div className="h-10 w-32 bg-slate-700/50 rounded-lg"></div>
+          <div className="h-10 w-48 bg-slate-800/50 rounded-lg animate-pulse"></div>
+          <div className="h-10 w-32 bg-slate-800/50 rounded-lg animate-pulse"></div>
         </div>
         <div className="space-y-4">
           {[1, 2, 3].map(i => (
-            <div key={i} className="h-20 bg-slate-800/40 rounded-xl"></div>
+            <div key={i} className="h-20 bg-slate-800/40 rounded-xl animate-pulse"></div>
           ))}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="p-8 space-y-8 w-full">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white display-font">Test Suite</h1>
-          <p className="text-slate-400 mt-1">Manage, record and trigger local automated scraper flows</p>
-        </div>
-        <button
-          onClick={() => onNavigate('/tests/new')}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg shadow-lg hover:shadow-blue-500/10 transition duration-150"
-        >
-          <Plus className="w-5 h-5" />
-          <span>New Test</span>
-        </button>
+  if (error) {
+    return (
+      <div className="p-8 w-full max-w-2xl mx-auto">
+        <ErrorState
+          message="Failed to load test suite."
+          details={error instanceof Error ? error.stack : String(error)}
+          onRetry={refetch}
+        />
       </div>
+    );
+  }
 
-      {error && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-lg">
-          {error}
-        </div>
-      )}
+  return (
+    <div className="p-8 space-y-8 w-full max-w-7xl mx-auto">
+      <PageHeader
+        title="Test Suite"
+        description="Manage, record, and trigger local automated test definitions"
+        actions={
+          <Button onClick={() => navigate('/tests/new')} className="gap-2">
+            <Plus className="w-4 h-4" />
+            <span>New Test</span>
+          </Button>
+        }
+      />
 
-      {tests.length === 0 ? (
-        <div className="border border-slate-750 bg-slate-850 rounded-xl p-16 text-center max-w-2xl mx-auto space-y-6">
-          <div className="w-16 h-16 bg-slate-800 border border-slate-700/50 rounded-full flex items-center justify-center mx-auto text-slate-500">
-            <ShieldAlert className="w-8 h-8" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-lg font-bold text-white display-font">No Tests Recorded</h3>
-            <p className="text-slate-400 max-w-md mx-auto text-sm">
-              ScrapeWizard is a record-first automation framework. Record browser actions to generate standalone Python scrapers and verification suites.
-            </p>
-          </div>
-          <button
-            onClick={() => onNavigate('/tests/new')}
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition"
-          >
-            Record Your First Test
-          </button>
+      {!tests || tests.length === 0 ? (
+        <div className="max-w-2xl mx-auto">
+          <EmptyState
+            icon={<ShieldAlert className="h-8 w-8" />}
+            title="No Tests Recorded"
+            description="ScrapeWizard is a record-first automation framework. Record browser actions to generate robust, self-healing test definitions."
+            action={{
+              label: "Record Your First Test",
+              onClick: () => navigate('/tests/new'),
+            }}
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {tests.map(test => (
             <div
               key={test.id}
-              onClick={() => onNavigate(`/tests/${test.id}`)}
-              className="px-6 py-5 bg-slate-850 border border-slate-750 hover:border-slate-700 rounded-xl flex items-center justify-between cursor-pointer transition"
+              onClick={() => navigate(`/tests/${test.id}`)}
+              className="px-6 py-5 bg-surface border border-edge/60 hover:border-slate-700 rounded-xl flex items-center justify-between cursor-pointer transition-all hover:bg-slate-850/20"
             >
               <div className="space-y-1.5 max-w-xl">
-                <h3 className="font-bold text-white text-base display-font">{test.name}</h3>
-                <p className="text-xs text-slate-500 truncate">{test.url}</p>
+                <h3 className="font-bold text-white text-base display-font hover:text-primary transition-colors">{test.name}</h3>
+                <p className="text-xs text-text-muted truncate font-mono">{test.url}</p>
                 <div className="flex items-center gap-3 pt-1 text-xs">
-                  <span className="px-2 py-0.5 bg-slate-800 text-slate-400 border border-slate-750 rounded-md font-medium">
+                  <span className="px-2 py-0.5 bg-slate-850 text-slate-400 border border-edge/40 rounded-md font-medium font-mono text-[10px]">
                     {test.step_count} Steps
                   </span>
                   
                   {test.last_run ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-600">•</span>
-                      <span className="text-slate-500">Last run:</span>
+                    <div className="flex items-center gap-1.5 text-text-muted text-[11px]">
+                      <span>•</span>
+                      <span>Last run:</span>
                       <span className={`flex items-center gap-1 font-semibold capitalize ${
-                        test.last_run.status === 'passed' ? 'text-emerald-400' : 'text-rose-400'
+                        test.last_run.status === 'passed' ? 'text-pass' : 'text-fail'
                       }`}>
                         {test.last_run.status === 'passed' ? <CheckCircle className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
                         {test.last_run.status}
                       </span>
                     </div>
                   ) : (
-                    <span className="text-slate-600">No runs executed</span>
+                    <span className="text-slate-600 text-[11px]">No runs executed</span>
                   )}
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={(e) => { e.stopPropagation(); onNavigate(`/tests/${test.id}`); }}
+              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate(`/tests/${test.id}`)}
                   title="View details"
-                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-750 text-slate-300 rounded-lg hover:text-white transition"
+                  className="px-2.5"
                 >
                   <Eye className="w-4 h-4" />
-                </button>
-                <button
+                </Button>
+                
+                <Button
+                  size="sm"
                   onClick={(e) => handleRun(e, test.id)}
                   disabled={!test.step_count}
+                  loading={triggerRunMutation.isPending && triggerRunMutation.variables === test.id}
                   title="Execute Run"
-                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50 disabled:hover:bg-blue-600 transition"
+                  className="px-2.5"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                </button>
-                <button
-                  onClick={(e) => handleDelete(e, test.id)}
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setTestToDelete(test.id)}
                   title="Delete test"
-                  className="p-2 bg-slate-800 hover:bg-rose-500/10 border border-slate-750 hover:border-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition"
+                  className="px-2.5 text-slate-400 hover:text-fail hover:bg-fail/10"
                 >
                   <Trash2 className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={testToDelete !== null}
+        title="Delete Test?"
+        description="Are you sure you want to delete this test? All recorded step definitions and run execution records will be lost permanently."
+        confirmLabel="Delete"
+        isDanger={true}
+        loading={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+        onCancel={() => setTestToDelete(null)}
+      />
     </div>
   );
 }

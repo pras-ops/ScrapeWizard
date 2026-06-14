@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { api, SettingData } from './lib/api';
+import React from 'react';
+import { createHashRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams } from 'react-router-dom';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { api } from './lib/api';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import Tests from './pages/Tests';
@@ -7,82 +9,32 @@ import NewTest from './pages/NewTest';
 import TestDetail from './pages/TestDetail';
 import RunDetail from './pages/RunDetail';
 import RunHistory from './pages/RunHistory';
+import { ToastContainer } from './components/ui/Toast';
 
 import { LayoutDashboard, ShieldCheck, ListTodo, Settings as SettingsIcon, Brain, Sparkles } from 'lucide-react';
 
-export default function App() {
-  // Simple, bulletproof hash routing for local FastAPI static mounts
-  const [route, setRoute] = useState<string>(() => {
-    return window.location.hash.slice(1) || '/';
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 5000,
+    },
+  },
+});
+
+function Layout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const path = location.pathname;
+
+  const { data: aiSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+    refetchInterval: 30000,
   });
 
-  const [aiSettings, setAiSettings] = useState<SettingData | null>(null);
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      setRoute(window.location.hash.slice(1) || '/');
-    };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
-
-  const navigate = (newRoute: string) => {
-    window.location.hash = newRoute;
-    setRoute(newRoute);
-  };
-
-  const loadAiStats = async () => {
-    try {
-      const data = await api.getSettings();
-      setAiSettings(data);
-    } catch {
-      // Ignore
-    }
-  };
-
-  useEffect(() => {
-    loadAiStats();
-    // Refresh stats periodically
-    const interval = setInterval(loadAiStats, 10000);
-    return () => clearInterval(interval);
-  }, [route]);
-
-  // Route matching
-  const renderContent = () => {
-    if (route === '/' || route === '/dashboard') {
-      return <Dashboard onNavigate={navigate} />;
-    }
-    if (route === '/settings') {
-      return <Settings />;
-    }
-    if (route === '/tests') {
-      return <Tests onNavigate={navigate} />;
-    }
-    if (route === '/tests/new') {
-      return <NewTest onNavigate={navigate} />;
-    }
-    if (route.startsWith('/tests/')) {
-      const id = parseInt(route.split('/')[2], 10);
-      return <TestDetail testId={id} onNavigate={navigate} />;
-    }
-    if (route.startsWith('/runs/')) {
-      const id = parseInt(route.split('/')[2], 10);
-      return <RunDetail runId={id} onNavigate={navigate} />;
-    }
-    if (route === '/runs') {
-      return <RunHistory onNavigate={navigate} />;
-    }
-    return (
-      <div className="p-8 text-center text-slate-400">
-        <h2 className="text-xl font-bold text-white">404 Not Found</h2>
-        <p className="mt-2">The requested route does not exist.</p>
-        <button onClick={() => navigate('/')} className="mt-4 px-4 py-2 bg-blue-600 rounded-lg">Go Home</button>
-      </div>
-    );
-  };
-
   const isActive = (paths: string[]) => {
-    return paths.some(p => route === p || (p !== '/' && route.startsWith(p)));
+    return paths.some(p => path === p || (p !== '/' && path.startsWith(p)));
   };
 
   return (
@@ -106,7 +58,7 @@ export default function App() {
           <nav className="p-4 space-y-1.5">
             <button
               onClick={() => navigate('/')}
-              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition ${
+              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition cursor-pointer ${
                 isActive(['/', '/dashboard']) 
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/10' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -118,7 +70,7 @@ export default function App() {
 
             <button
               onClick={() => navigate('/tests')}
-              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition ${
+              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition cursor-pointer ${
                 isActive(['/tests']) 
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/10' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -130,7 +82,7 @@ export default function App() {
 
             <button
               onClick={() => navigate('/runs')}
-              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition ${
+              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition cursor-pointer ${
                 isActive(['/runs']) 
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/10' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -142,7 +94,7 @@ export default function App() {
 
             <button
               onClick={() => navigate('/settings')}
-              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition ${
+              className={`w-full px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition cursor-pointer ${
                 isActive(['/settings']) 
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/10' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -178,10 +130,55 @@ export default function App() {
 
         {/* Dynamic view */}
         <main className="flex-1 overflow-y-auto flex bg-[#101622]">
-          {renderContent()}
+          <Outlet />
         </main>
       </div>
 
     </div>
+  );
+}
+
+function TestDetailWrapper() {
+  const { id } = useParams<{ id: string }>();
+  return <TestDetail testId={id ? parseInt(id, 10) : 0} />;
+}
+
+function RunDetailWrapper() {
+  const { id } = useParams<{ id: string }>();
+  return <RunDetail runId={id ? parseInt(id, 10) : 0} />;
+}
+
+const router = createHashRouter([
+  {
+    path: '/',
+    element: <Layout />,
+    children: [
+      { path: '/', element: <Dashboard /> },
+      { path: '/dashboard', element: <Dashboard /> },
+      { path: '/settings', element: <Settings /> },
+      { path: '/tests', element: <Tests /> },
+      { path: '/tests/new', element: <NewTest /> },
+      { path: '/tests/:id', element: <TestDetailWrapper /> },
+      { path: '/runs/:id', element: <RunDetailWrapper /> },
+      { path: '/runs', element: <RunHistory /> },
+      {
+        path: '*',
+        element: (
+          <div className="p-8 text-center text-slate-400 w-full">
+            <h2 className="text-xl font-bold text-white">404 Not Found</h2>
+            <p className="mt-2">The requested route does not exist.</p>
+          </div>
+        )
+      }
+    ]
+  }
+]);
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+      <ToastContainer />
+    </QueryClientProvider>
   );
 }
