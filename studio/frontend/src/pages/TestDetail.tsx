@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTest, useUpdateTest, useTriggerRun } from '../hooks/useApi';
-import { Button, Card, CardContent, PageHeader, ErrorState, toast } from '../components/ui';
+import { Button, Card, CardContent, ErrorState, toast } from '../components/ui';
 import { Play, Download, Save, Trash2, ArrowUp, ArrowDown, ArrowLeft, Plus, X } from 'lucide-react';
 import { StepData } from '../lib/api';
 

@@ -7,6 +7,8 @@ from scrapewizard.llm.prompts import SYSTEM_PROMPT_CODEGEN
 from scrapewizard.core.logging import log
 from scrapewizard.utils.file_io import safe_write_json
 
+from scrapewizard.llm.routing import LLMTask
+
 class CodeGenerator:
     """Handles the LLM Code Generation phase.
     
@@ -68,30 +70,30 @@ LLM Understanding: {json.dumps(understanding, indent=2)}
 Run Config: {json.dumps(run_config, indent=2)}
 Behavioral Scan Profile: {json.dumps(scan_profile, indent=2) if scan_profile else "None"}
 Interaction: {json.dumps(interaction, indent=2) if interaction else "None"}
-
+ 
 {hostility_context}
 {cookies_context}
-
+ 
 Generate the 'generated_scraper.py' implementation.
 IMPORTANT: Output ONLY valid Python code. No explanations, no markdown.
-
+ 
 REQUIRED STRUCTURE:
 ```python
 from scrapewizard_runtime import BaseScraper
-
+ 
 class Scraper(BaseScraper):
     async def navigate(self):
         # Implementation...
         pass
-
+ 
     async def get_items(self):
         # Implementation...
         return []
-
+ 
     async def parse_item(self, item):
         # Implementation...
         return {{}}
-
+ 
 if __name__ == "__main__":
     Scraper(
         mode="{run_config.get('browser_mode', 'headless')}", 
@@ -101,7 +103,7 @@ if __name__ == "__main__":
         navigation_steps={json.dumps(nav_steps)}
     ).run()
 ```
-
+ 
 DATA QUALITY RULES:
 1. Prefer stable CSS selectors over dynamic classes.
 2. Use `await self.runtime.smart_wait(selector)` before querying elements.
@@ -110,13 +112,30 @@ DATA QUALITY RULES:
 5. Ensure the script structure strictly follows the REQUIRED STRUCTURE above.
 """
         
-        code = self.client.call(SYSTEM_PROMPT_CODEGEN, user_prompt, json_mode=False)
+        code = self.client.call(SYSTEM_PROMPT_CODEGEN, user_prompt, json_mode=False, task=LLMTask.CODEGEN)
         
         # Save raw response
         self._save_log("codegen_response.py", code)
         
         # Robust extraction: find Python code block
         code = self.client.extract_python_code(code)
+        
+        # AST Validation and quality gate
+        import ast
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            log(f"Generated scraper has syntax error: {e}", level="warning")
+            from scrapewizard.llm.routing import RoutingPolicy
+            routed_provider, _ = RoutingPolicy().route(LLMTask.CODEGEN, self.client.config, force_cloud=True)
+            if routed_provider != "local":
+                log(f"Syntax validation failed on local model. Retrying using cloud provider '{routed_provider}'...", level="info")
+                try:
+                    code = self.client.call(SYSTEM_PROMPT_CODEGEN, user_prompt, json_mode=False, task=LLMTask.CODEGEN, force_cloud=True)
+                    self._save_log("codegen_response_cloud_fallback.py", code)
+                    code = self.client.extract_python_code(code)
+                except Exception as ex:
+                    log(f"Cloud fallback code generation failed: {ex}. Keeping the local code.", level="error")
         
         output_path = self.project_dir / "generated_scraper.py"
         with open(output_path, "w", encoding="utf-8") as f:

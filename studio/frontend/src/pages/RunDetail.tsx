@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRun } from '../hooks/useApi';
-import { Button, Card, CardHeader, CardTitle, CardContent, StatusPill, PageHeader, LoadingSkeleton, ErrorState } from '../components/ui';
+import { Button, Card, CardHeader, CardTitle, CardContent, StatusPill, ErrorState } from '../components/ui';
 import { ArrowLeft, Clock, Zap, ShieldAlert, CheckCircle2, RefreshCw, Layers } from 'lucide-react';
 import { API_BASE } from '../lib/api';
 
@@ -55,9 +55,7 @@ export default function RunDetail({ runId }: RunDetailProps) {
       </div>
     );
   }
-
   const selectedStep = selectedStepIdx !== null ? run.step_results[selectedStepIdx] : undefined;
-  const isRunning = run.status === 'running' || run.status === 'queued';
 
   return (
     <div className="p-8 space-y-6 w-full max-w-7xl mx-auto">

@@ -1,8 +1,7 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStats, useRuns } from '../hooks/useApi';
-import { Button, Card, CardHeader, CardTitle, CardContent, StatusPill, PageHeader, LoadingSkeleton, ErrorState, EmptyState } from '../components/ui';
-import { Play, Plus, Activity, CheckCircle, Clock, Zap, ArrowRight, Kanban } from 'lucide-react';
+import { Button, Card, CardHeader, CardTitle, CardContent, StatusPill, PageHeader, ErrorState, EmptyState } from '../components/ui';
+import { Plus, Activity, CheckCircle, Clock, Zap, ArrowRight, Kanban } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();

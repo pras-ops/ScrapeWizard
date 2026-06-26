@@ -1,4 +1,3 @@
-import React from 'react';
 import { createHashRouter, RouterProvider, Outlet, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { api } from './lib/api';

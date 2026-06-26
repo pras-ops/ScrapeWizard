@@ -1,7 +1,6 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRuns } from '../hooks/useApi';
-import { Button, Card, CardHeader, CardTitle, CardContent, StatusPill, PageHeader, LoadingSkeleton, ErrorState, EmptyState } from '../components/ui';
+import { Card, StatusPill, PageHeader, ErrorState, EmptyState } from '../components/ui';
 import { Clock, Zap, Activity } from 'lucide-react';
 
 export default function RunHistory() {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTests, useDeleteTest, useTriggerRun } from '../hooks/useApi';
-import { Button, Card, CardContent, PageHeader, ErrorState, ConfirmDialog, toast, StatusPill } from '../components/ui';
+import { Button, PageHeader, ErrorState, ConfirmDialog, toast, EmptyState } from '../components/ui';
 import { Play, Trash2, Eye, Plus, ShieldAlert, CheckCircle } from 'lucide-react';
 
 export default function Tests() {

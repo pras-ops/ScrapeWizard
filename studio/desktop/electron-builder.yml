@@ -1,0 +1,16 @@
+appId: com.scrapewizard.studio
+productName: ScrapeWizard Studio
+directories:
+  output: dist
+mac:
+  target: [dmg, zip]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+win:
+  target: [nsis]
+linux:
+  target: [AppImage, deb]
+extraResources:
+  - from: build/python-runtime
+    to: python-runtime

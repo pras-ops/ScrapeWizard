@@ -39,8 +39,12 @@ def db_session_fixture():
         yield session
 
 @pytest.fixture(name="client")
-def client_fixture(db_session):
-    """Overrides DB dependency to inject in-memory session."""
+def client_fixture(db_session, monkeypatch):
+    """Overrides DB dependency to inject in-memory session and isolates configuration."""
+    from scrapewizard.core.config import ConfigManager
+    monkeypatch.setattr(ConfigManager, "load_config", lambda: {"provider": "openai", "model": "gpt-4-turbo"})
+    monkeypatch.setattr(ConfigManager, "get_api_key", lambda provider: "")
+    
     def get_test_session():
         yield db_session
         
@@ -126,3 +130,53 @@ def test_stats_and_runs_list(client, db_session):
     assert response.json()["tests"] == 0
     assert response.json()["runs_today"] == 0
     assert response.json()["ai_spend"] == 0.0
+
+def test_studio_parity_validator(tmp_path, monkeypatch):
+    """Verify that the parity validator calculates correct drift rates and status."""
+    import json
+    from studio.backend.test_runner import StudioParityValidator
+    from scrapewizard.runtime.tester import ScriptTester
+    from scrapewizard.core.project_manager import ProjectManager
+    
+    # 1. Create a dummy recording baseline
+    recording_file = tmp_path / "recording.jsonl"
+    with open(recording_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "extract", "data": {"title": "Book 1", "price": "£10"}}) + "\n")
+        f.write(json.dumps({"type": "extract", "data": {"title": "Book 2", "price": "£20"}}) + "\n")
+        
+    # 2. Mock project setup
+    project_dir = tmp_path / "test_project"
+    project_dir.mkdir()
+    (project_dir / "output").mkdir()
+    
+    # Write actual output that has drift (Book 2 is missing price, and Book 1 has mismatching price)
+    actual_data = [
+        {"title": "Book 1", "price": "£15"}, # mismatching price (1 drift)
+        {"title": "Book 2"}                  # missing price (1 drift)
+    ]
+    
+    output_file = project_dir / "output" / "data.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(actual_data, f)
+        
+    # Create dummy generated_scraper.py so validator thinks it exists
+    with open(project_dir / "generated_scraper.py", "w") as f:
+        f.write("# dummy")
+        
+    # Mock ScriptTester.run_test to succeed
+    monkeypatch.setattr(ScriptTester, "run_test", lambda script_path, cwd, wizard_mode: (True, "mock-run-success"))
+    
+    # Mock Projects Root
+    monkeypatch.setattr(ProjectManager, "PROJECTS_ROOT", tmp_path)
+    
+    # 3. Validate
+    validator = StudioParityValidator()
+    report = validator.validate(str(project_dir), recording_file)
+    
+    assert report["status"] == "drift_detected"
+    # Total keys checked in baseline: 4 (Book 1 title/price, Book 2 title/price)
+    # Drifted keys: 2 (Book 1 price mismatched, Book 2 price missing)
+    # Drift rate should be 2/4 = 50%
+    assert report["drift_rate"] == 0.5
+    assert "price" in report["failing_selectors"]
+    assert "title" in report["stable_selectors"]

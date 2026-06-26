@@ -36,12 +36,27 @@ function createWindow() {
     });
 }
 
+let llamaServerProcess;
+
 function startBackend() {
     console.log("Starting FastAPI Backend...");
-    const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
-    const backendFilePath = path.join(__dirname, '../backend/main.py');
+    
+    let exePath;
+    let args = [];
+    
+    if (isDev) {
+        exePath = process.platform === 'win32' ? 'python' : 'python3';
+        args = [path.join(__dirname, '../backend/main.py')];
+    } else {
+        // PyInstaller bundles the backend binary into the resources/python-runtime folder
+        const resourcesPath = process.resourcesPath;
+        exePath = process.platform === 'win32'
+            ? path.join(resourcesPath, 'python-runtime', 'backend.exe')
+            : path.join(resourcesPath, 'python-runtime', 'backend');
+    }
 
-    backendProcess = spawn(pythonPath, [backendFilePath]);
+    console.log(`Spawning backend: ${exePath} with args: ${args.join(' ')}`);
+    backendProcess = spawn(exePath, args);
 
     backendProcess.stdout.on('data', (data) => {
         console.log(`Backend stdout: ${data}`);
@@ -52,8 +67,43 @@ function startBackend() {
     });
 }
 
+function startLlamaServer() {
+    if (isDev) {
+        console.log("llama-server is skipped in dev mode.");
+        return;
+    }
+    
+    const fs = require('fs');
+    const resourcesPath = process.resourcesPath;
+    const llamaServerPath = process.platform === 'win32'
+        ? path.join(resourcesPath, 'llama-server.exe')
+        : path.join(resourcesPath, 'llama-server');
+        
+    const modelPath = path.join(resourcesPath, 'models', 'qwen2.5-coder-3b-q4.gguf');
+    
+    if (fs.existsSync(llamaServerPath) && fs.existsSync(modelPath)) {
+        console.log("Starting embedded llama-server...");
+        llamaServerProcess = spawn(llamaServerPath, [
+            '-m', modelPath,
+            '-c', '2048',
+            '--port', '11434' // Run on mock Ollama port
+        ]);
+        
+        llamaServerProcess.stdout.on('data', (data) => {
+            console.log(`llama-server: ${data}`);
+        });
+        
+        llamaServerProcess.stderr.on('data', (data) => {
+            console.error(`llama-server stderr: ${data}`);
+        });
+    } else {
+        console.log("llama-server or model file not found in extraResources. Skipping embedded llama-server startup.");
+    }
+}
+
 app.on('ready', () => {
     startBackend();
+    startLlamaServer();
     createWindow();
 });
 
@@ -67,6 +117,9 @@ app.on('will-quit', () => {
     if (backendProcess) {
         backendProcess.kill();
     }
+    if (llamaServerProcess) {
+        llamaServerProcess.kill();
+    }
 });
 
 app.on('activate', () => {
@@ -74,3 +127,4 @@ app.on('activate', () => {
         createWindow();
     }
 });
+

@@ -96,10 +96,66 @@ def doctor() -> None:
     if config_ok:
         try:
             from scrapewizard.llm.client import LLMClient
+            from scrapewizard.llm.local_runtime import LocalRuntime
+            from scrapewizard.core.constants import LOCAL_LLM_PROBE_TIMEOUT
+            
             client = LLMClient()
-            rprint(f"• LLM Client: [green]Initialized[/green] ({client.provider}/{client.model})")
+            provider = client.provider
+            
+            if provider == "local":
+                runtime = LocalRuntime()
+                daemon = runtime.check_daemon()
+                
+                if daemon.running:
+                    rprint(f"• Local AI Runtime: [green]Ollama {daemon.version}[/green]")
+                    models = runtime.list_models()
+                    model_name = client.model
+                    
+                    model_loaded = False
+                    for m in models:
+                        if m == model_name or m.startswith(model_name + ":") or model_name.startswith(m + ":"):
+                            model_loaded = True
+                            break
+                            
+                    if model_loaded:
+                        rprint(f"• Local Model: [green]{model_name}[/green]")
+                        # Run probe
+                        probe_res = runtime.probe(model_name, timeout=LOCAL_LLM_PROBE_TIMEOUT)
+                        if probe_res.success:
+                            rprint(f"• LLM Local: [green]✅ Ollama running, model {model_name} loaded, probe: {probe_res.latency}s[/green]")
+                        else:
+                            rprint(f"• LLM Local: [red]❌ Probe failed: {probe_res.error}[/red]")
+                    else:
+                        rprint(f"• Local Model: [yellow]Not pulled ({model_name})[/yellow]")
+                        rprint(f"• LLM Local: [yellow]⚠️ Model not pulled. Run 'scrapewizard setup'[/yellow]")
+                else:
+                    rprint(f"• Local AI Runtime: [red]Ollama not running[/red]")
+                    rprint(f"• LLM Local: [red]❌ Ollama daemon is down[/red]")
+                    
+                # Hardware Tier
+                hw = runtime.detect_hardware()
+                rprint(f"• Hardware Tier: [cyan]{hw['tier'].upper()}[/cyan] ({hw['ram_gb']} GB RAM, {hw['gpu_name']})")
+                
+            else:
+                # Cloud client probe check
+                import time
+                start_time = time.time()
+                try:
+                    # Let's run a small test call to verify cloud connectivity
+                    response = client.call(
+                        system_prompt="you are a health check assistant. reply with ok",
+                        user_prompt="ping",
+                        json_mode=False
+                    )
+                    latency = round(time.time() - start_time, 2)
+                    if "ok" in response.lower():
+                        rprint(f"• LLM Cloud: [green]✅ {client.provider}/{client.model}, probe: {latency}s[/green]")
+                    else:
+                        rprint(f"• LLM Cloud: [yellow]⚠️ {client.provider}/{client.model} responded but output was: {response} ({latency}s)[/yellow]")
+                except Exception as e:
+                    rprint(f"• LLM Cloud: [red]❌ Connection failed to {client.provider}/{client.model}: {e}[/red]")
         except Exception as e:
-            rprint(f"• LLM Client: [red]Error ({e})[/red]")
+            rprint(f"• LLM Client: [red]Error initializing client ({e})[/red]")
     
     rprint("\n[bold green]System check complete.[/bold green]")
 

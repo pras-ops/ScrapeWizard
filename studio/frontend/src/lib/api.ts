@@ -9,6 +9,9 @@ export interface SettingData {
   has_key: boolean;
   visual_threshold: number;
   retention: number;
+  local_base_url?: string;
+  local_model?: string;
+  offline_only?: boolean;
 }
 
 export interface StepData {
@@ -109,11 +112,21 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
-  testConnection: (data: { provider: string; model: string; api_key: string }) =>
+  testConnection: (data: { provider: string; model: string; api_key?: string; local_base_url?: string }) =>
     request<{ ok: boolean; message: string }>('/settings/test-connection', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getLocalStatus: () =>
+    request<{
+      daemon_running: boolean;
+      daemon_version: string;
+      installed_models: string[];
+      hardware_tier: string;
+      ram_gb: number;
+      gpu: string;
+      recommended_model: string;
+    }>('/settings/local-status'),
 
   listTests: () => request<TestData[]>('/tests'),
   createTest: (data: { url: string; name?: string }) =>

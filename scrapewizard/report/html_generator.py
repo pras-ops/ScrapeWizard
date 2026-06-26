@@ -16,7 +16,7 @@ class ReportGenerator:
             loader=jinja2.FileSystemLoader(Path(__file__).parent / "templates")
         )
 
-    def generate(self):
+    def generate(self, duration_seconds: float = 0.0):
         """Generate report.html."""
         log("Generating HTML report...")
         
@@ -30,7 +30,7 @@ class ReportGenerator:
         # Mock stats for MVP if not tracked elsewhere
         stats = {
             "rows_extracted": len(items),
-            "duration_seconds": 0, # Placeholder
+            "duration_seconds": round(duration_seconds, 2),
             "error_count": 0
         }
         

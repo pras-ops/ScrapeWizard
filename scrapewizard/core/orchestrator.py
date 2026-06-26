@@ -855,7 +855,10 @@ class Orchestrator:
                     print(f"🤖 [bold cyan]AI Usage Summary:[/bold cyan]")
                     print(f"   • Calls: {stats['calls']}")
                     print(f"   • Tokens: {stats['input_tokens'] + stats['output_tokens']} ({stats['input_tokens']} in, {stats['output_tokens']} out)")
-                    print(f"   • Est. Cost: ${cost:.4f}\n")
+                    if isinstance(cost, str):
+                        print(f"   • Est. Cost: {cost}\n")
+                    else:
+                        print(f"   • Est. Cost: ${cost:.4f}\n")
 
                 print(f"Your data is ready:")
                 print(f"{output_file}\n")
@@ -905,7 +908,8 @@ class Orchestrator:
         try:
             from scrapewizard.report.html_generator import ReportGenerator
             generator = ReportGenerator(self.project_dir)
-            generator.generate()
+            duration = time.time() - self.start_time
+            generator.generate(duration_seconds=duration)
             report_src = self.project_dir / "report.html"
             if report_src.exists():
                 shutil.copy2(report_src, output_dir / "report.html")

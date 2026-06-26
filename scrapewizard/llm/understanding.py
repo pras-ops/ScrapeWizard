@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 from scrapewizard.llm.client import LLMClient
+from scrapewizard.llm.routing import LLMTask
+from scrapewizard.llm.schemas import UNDERSTANDING_SCHEMA, validate_schema
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_UNDERSTANDING
 from scrapewizard.core.logging import log
 from scrapewizard.utils.file_io import safe_write_json
@@ -44,12 +46,16 @@ class UnderstandingAgent:
         {json.dumps(interaction_log, indent=2) if interaction_log else "None"}
         """
         
-        response_text = self.client.call(SYSTEM_PROMPT_UNDERSTANDING, user_prompt)
+        response_text = self.client.call(SYSTEM_PROMPT_UNDERSTANDING, user_prompt, task=LLMTask.UNDERSTAND)
         
         # Save raw response
         self._save_log("call1_response.json", response_text)
         
         parsed = self.client.parse_json(response_text)
+        
+        # Validate schema
+        if not validate_schema(parsed, UNDERSTANDING_SCHEMA):
+            log("LLM understanding output failed schema validation. Output might be malformed.", level="warning")
         
         # Save understanding artifact
         safe_write_json(self.project_dir / "llm_understanding.json", parsed)

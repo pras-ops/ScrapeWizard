@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from scrapewizard.llm.client import LLMClient
+from scrapewizard.llm.routing import LLMTask
 from scrapewizard.llm.prompts import SYSTEM_PROMPT_REPAIR
 from scrapewizard.core.logging import log
 from scrapewizard.utils.file_io import safe_read_json, safe_write_json
@@ -82,7 +83,7 @@ if __name__ == "__main__":
     Scraper(mode="...", output_format="...", pagination_config={{...}}, pagination_meta={{...}}).run()
 """
         
-        new_code = self.client.call(SYSTEM_PROMPT_REPAIR, user_prompt, json_mode=False)
+        new_code = self.client.call(SYSTEM_PROMPT_REPAIR, user_prompt, json_mode=False, task=LLMTask.REPAIR)
         
         # Save raw response
         self._save_log(f"repair_response_{int(time.time())}.py", new_code)

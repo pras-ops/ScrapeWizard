@@ -85,6 +85,14 @@ jobs:
         working-directory: studio/frontend
         run: npm run lint
 
+      - name: Run type-check
+        working-directory: studio/frontend
+        run: npm run type-check
+
+      - name: Run test
+        working-directory: studio/frontend
+        run: npm run test
+
       - name: Run build
         working-directory: studio/frontend
         run: npm run build

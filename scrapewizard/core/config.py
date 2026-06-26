@@ -21,7 +21,11 @@ class ConfigManager:
 
     DEFAULT_CONFIG = {
         "provider": "openai",
-        "model": "gpt-4-turbo"
+        "model": "gpt-4-turbo",
+        "local_base_url": "http://localhost:11434",
+        "local_model": "qwen2.5-coder:3b",
+        "local_tier": "balanced",
+        "offline_only": False,
     }
 
     @classmethod
@@ -51,7 +55,7 @@ class ConfigManager:
                 migrated = True
                 
             # Pattern 2: Provider-specific keys
-            for provider in ["openai", "anthropic", "openrouter", "local"]:
+            for provider in ["openai", "anthropic", "openrouter", "local", "local-embedded"]:
                 if provider in data and isinstance(data[provider], dict) and "api_key" in data[provider]:
                     cls.save_api_key(provider, data[provider]["api_key"])
                     del data[provider]["api_key"]
@@ -136,6 +140,8 @@ class ConfigManager:
 
     @classmethod
     def check_setup(cls) -> bool:
-        """Check if essential configuration (API key) is set."""
+        """Check if essential configuration (API key or local setup) is set."""
         config = cls.load_config()
+        if config.get("provider") == "local":
+            return True
         return bool(config.get("api_key"))

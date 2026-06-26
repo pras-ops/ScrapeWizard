@@ -21,7 +21,7 @@ export function useUpdateSettings() {
 
 export function useTestConnection() {
   return useMutation({
-    mutationFn: (data: { provider: string; model: string; api_key: string }) =>
+    mutationFn: (data: { provider: string; model: string; api_key?: string; local_base_url?: string }) =>
       api.testConnection(data),
   });
 }
@@ -96,7 +96,7 @@ export function useTriggerRun() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (testId: number) => api.triggerRun(testId),
-    onSuccess: (data, testId) => {
+    onSuccess: (_, testId) => {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       queryClient.invalidateQueries({ queryKey: ["tests", testId] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
@@ -111,7 +111,10 @@ export function useRuns(testId?: number, status?: string) {
   });
 }
 
-export function useRun(runId: number, refetchInterval: number | false = false) {
+export function useRun(
+  runId: number,
+  refetchInterval: number | false | ((query: any) => number | false | undefined) = false
+) {
   return useQuery<RunDetailData>({
     queryKey: ["runs", runId],
     queryFn: () => api.getRun(runId),
