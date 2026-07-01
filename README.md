@@ -5,7 +5,7 @@
 ScrapeWizard is a professional, developer-first toolkit for building, executing, and maintaining reliable web automation workflows. By combining high-fidelity browser recording with an offline, multi-tier self-healing engine, ScrapeWizard ensures your scrapers and test suites survive target site markup changes, class renames, and structural mutations without manual script updates.
 
 > [!IMPORTANT]
-> **Key Philosophy:** AI is an *optional enhancer* to help you name steps and recover from catastrophic layout shifts. It is **never** on the runtime hot-path. If target pages haven't mutated, runtime AI cost is **$0.00**, ensuring high performance, zero runtime LLM costs, and 100% deterministic scraper/test execution.
+> **Key Philosophy:** AI is an *optional enhancer* to help you name steps and recover from layout shifts. It is **never** on the runtime hot-path. If target pages haven't mutated, runtime AI cost is **$0.00**, ensuring high performance, zero runtime LLM costs, and 100% deterministic scraper/test execution.
 
 ---
 
