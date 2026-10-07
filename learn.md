@@ -20,6 +20,7 @@ scrapewizard <url>            scrapewizard run books.recipe.yaml
    fetch the page                      load the recipe
         │                                   │
    find the list  ── builder.py        read every page ── extract.py
+   (or embedded.py)
         │                                   │
    preview, one question               checks pass? ── no ──> repair ── heal.py
         │                                   │
@@ -28,7 +29,7 @@ scrapewizard <url>            scrapewizard run books.recipe.yaml
                                        save data
 ```
 
-Everything below lives in `scrapewizard/recipe/` (about 2,700 lines) plus one command file,
+Everything below lives in `scrapewizard/recipe/` (about 3,200 lines) plus one command file,
 `scrapewizard/cli/commands/recipe.py`.
 
 ---
@@ -41,6 +42,7 @@ Everything below lives in `scrapewizard/recipe/` (about 2,700 lines) plus one co
 | `types.py` | Recognising what a value is (money, number, date, email, link, image, text) and converting it |
 | `fetch.py` | Getting a page: plain HTTP first, a browser when needed; "load more", scrolling, sign-in |
 | `builder.py` | Finding the list on a page and writing a recipe for it. No AI. The largest file |
+| `embedded.py` | Finding and reading a list the page ships as data in a script |
 | `extract.py` | Running a recipe: reading rows, following pages and item pages, evaluating checks |
 | `detail.py` | Working out what to collect from each item's own page (`--follow`) |
 | `state.py` | What the last run saw, and the difference from this one |
@@ -76,6 +78,9 @@ Three things in it are worth knowing:
   record split over two neighbours is one row: a `dt` and the `dd` after it, or a title row and
   the details row under it.
 
+- **A container starting with `data:`** means the list is read from JSON embedded in the page,
+  not from its HTML (§4.6). The fields are then paths: `price.amount`, `images.0.url`.
+
 Pagination types are `none`, `next_link`, `auto`, `load_more` and `scroll`.
 
 ---
@@ -89,8 +94,12 @@ This is the heart of the tool. `build_recipe(html, url)` does five things.
 Two kinds of repetition are looked for:
 
 1. **Elements that share a tag and classes** anywhere on the page: `article.product_pod`,
-   `tr.team`. Classes that look machine-generated (`css-1x2y3z`, `sc-bdVaJa`) or that are layout
-   utilities (`col-sm-4`, `mt-4`) are ignored.
+   `tr.team`. Classes that look machine-generated (`css-1x2y3z`, `sc-bdVaJa`, `jeApUG`) or that
+   are layout utilities (`col-sm-4`, `mt-4`) are ignored. Markers a site adds for its own tests
+   or for search engines (`data-testid`, `data-qa`, `itemprop`, …) count like classes and make
+   the better selector: `h2[data-testid="card-headline"]` survives a restyle.
+   Markers that differ only in their first word (`dundee-card`, `london-card`) are also offered
+   together, as `div[data-testid$="-card"]`: the same thing in several layouts.
 2. **Same-tag children of one parent**: the `li`s of a `ul`, the `tr`s of a table. These are
    reached from the nearest ancestor that can be named uniquely by id or class
    (`#stats > tbody > tr`). If nothing can be named, the path starts at `body`.
@@ -146,6 +155,10 @@ stats line inside the card. Two rules settle it:
   holding the same fields, the innermost is chosen because it is named for what it is
   (`article.product_pod`, not `li.col-xs-6`).
 
+- **All the layouts, not one.** If a larger block contains every chosen item and reads nearly
+  all the same fields the same way, it is the list. A table's spacer rows do not have those
+  fields, so a block that merely surrounds the chosen one does not qualify.
+
 `--like "a value"` filters the candidates to those containing that value before any of this.
 
 ### 4.5 Name and type the fields
@@ -157,9 +170,15 @@ Names come from, in order:
 2. the type (`price`, `date`, `image`, `url`, `email`);
 3. "title" for a heading, a `title` attribute, a class that says `title` or `headline`, or
    failing those the main link's text;
-4. the element's own class (`span.author` → `author`), preferring a class that contains a
-   telling word (title, name, author, price, date, …);
-5. `text`, `text_2`, `number` when nothing says more.
+4. a marker on the element (`itemprop="programmingLanguage"` → `programming_language`), then
+   its own class (`span.author` → `author`), preferring one that contains a telling word
+   (title, name, author, price, date, …); microformat prefixes are dropped (`u-author`);
+5. what surrounds the value, when the element itself says nothing: the constant end of its
+   link (`/owner/repo/stargazers` → `stargazers`), an icon's label, "3 hours ago" (`age`), the
+   words after a number ("12 stars today" → `stars_today`), a label before the value
+   ("Language: Go"), or the class of the element around it;
+6. `description` for one long text under a title;
+7. `text`, `text_2`, `number` when nothing says more.
 
 Links are named after the text they belong to: the title's link is `url`, the author's is
 `author_url`. Icon links with no text are dropped when the record has a real link.
@@ -167,14 +186,35 @@ Links are named after the text they belong to: the title's link is `url`, the au
 Finally the recipe is run against the same page it was built from. Only a recipe that actually
 returns rows is offered to the user.
 
+### 4.6 When the HTML holds no list: data in the page (`embedded.py`)
+
+A page drawn by JavaScript often carries the list it is about to draw as JSON in a script:
+`__NEXT_DATA__`, JSON-LD, or `window.__STATE__ = {...}`. If the HTML gives no list, or only a
+menu, `find_lists` walks every piece of JSON in the page for lists of objects and describes
+each one the same way an HTML block is described: which values are present on most entries,
+which are constant, which read like a name. Internal keys, tokens and whole article bodies are
+left out; a list needs three columns and something name-like, so a menu or a language picker
+in the page's settings is not mistaken for records.
+
+The recipe's container is then `data:` plus the path to the list, and running it needs no
+browser and no selectors. Only real JSON is read. A JavaScript object with unquoted keys is
+code, and guessing at code is not worth being wrong.
+
+A list found only in navigation is marked (`in_menu`). The command then tries the browser, and
+if the menu is still all there is, says so.
+
 ---
 
 ## 5. Getting pages (`fetch.py`)
 
 - **Plain HTTP first** with one shared connection. The character set is taken from the response
   header or the page's own `<meta charset>`.
-- **A browser only when needed**: the plain page shows no list, the site refuses the request,
-  the values given with `--like` are not in the plain page, or the user asks (`--browser`).
+- **A browser only when needed**: the plain page shows no list (and carries none as data),
+  the site refuses the request, the values given with `--like` are not in the plain page, or
+  the user asks (`--browser`).
+- **Frames.** If the page has up to four frames from the same site, each is fetched and the
+  one with the most rows is used when it clearly beats the page around it. The recipe is
+  written for the frame's address.
 - **One browser session per run.** `BrowserSession` opens once and is reused for every page.
 - **"Load more" and infinite scroll** are both waited on the same way: after the click or the
   scroll, wait until at least five new elements have appeared and the count has stopped
@@ -222,6 +262,8 @@ The same file is what makes repair safe. When a recipe stops matching:
 
 A scraper has something a test tool lacks: yesterday's data says whether today's repair is
 right. Repairs are recorded in the recipe's `history`. Item-page fields are not repaired yet.
+A `data:` recipe is repaired the same way: if the site renames the key the list sits under,
+the list is found again in the page's data and matched by its values.
 
 ---
 
@@ -260,7 +302,8 @@ script. Errors are written as what happened, the likely reason and what to try.
 `tests/recipe/` holds the tests for everything above. Each builder test is a small page that
 reproduces a shape that went wrong on a live site: cards inside grid wrappers, a quote with a
 tag list, tables with and without classes, a `dt`/`dd` list, a title row with a details row,
-a list marked `menu`, generated class names. No test touches the internet. Tests that need
+a list marked `menu`, generated class names, cards in several layouts, a page whose classes
+are all styling, data in a script. No test touches the internet. Tests that need
 JavaScript, "load more", scrolling or sign-in serve a page from the local machine and open it
 in a real browser.
 

@@ -174,7 +174,8 @@ to manage. `build` stays as an alias for a while so existing users aren't broken
 > **Built so far:** `scrapewizard <url>` and `scrapewizard run`, with `--follow`, `--login`,
 > `--browser`, `--ask` and `--no-repair` added to the flags below. **Not built:** `edit`
 > (a recipe is edited by hand for now, and the `[e]` choice is not in the preview). The older
-> commands (`build`, `setup`, `login`, `list`, `resume`, `clean`) are still there.
+> builder's commands (`build`, `list`, `resume`, `clean`) still work but are hidden from
+> `--help`, which shows six: `get`, `run`, `doctor`, `setup`, `login`, `version`.
 
 Common flags, the same on `<url>` and `run`:
 
@@ -343,15 +344,15 @@ checks:
 
 ## 8. Part B — Improvement plan
 
-### Status (2026-10-07, third pass)
+### Status (2026-10-07, fourth pass)
 
 | Phase | State | Done | Still open |
 |---|---|---|---|
 | 0. Quick wins | **Done** for the new path | CSV and pagination defects fixed; timed progress waits removed; URL as a plain argument; files in the current folder; default install cut from 25 packages to 13, with `ai`, `excel` and `dev` extras; all tests pass (the hardware-detection test included); CI installs the browser | One browser session in the older AI builder; lazy loading of the older builder's packages |
 | 1. Recipe and runtime | **Done** | Recipe format, typed fields, selector ladders, HTTP runtime, pagination, de-duplication, checks, `run`, one shared HTTP connection | Retiring `list` / `resume` / `clean` |
-| 2. Build without AI | **Done** | Builder with no LLM; `--like`; preview and single question; named status values kept; single-class fallbacks; lists found through their parent when rows share no class; records split over two neighbours; table headings as column names; pages with no ids or classes; optional AI (`--ai`, `--ask`) that returns a validated recipe | `edit` with point-and-click; better column names on sites with generated classes; removing the older builder's modes |
-| 3. Fetch ladder | Partly done | HTTP first, browser fallback (also when HTTP is refused), one browser per run; "load more" and infinite scroll; `--login` with a saved session; item pages read JSON-LD and meta tags | Embedded data as the source for a *list* (`__NEXT_DATA__`, JSON-LD item lists); using a discovered API; frames |
-| 4. Self-healing | **Done for lists** | Repair by re-finding the data and matching fields against remembered records; verified when known items are found again; refused when a required field cannot be found; history kept in the recipe | Repair of item-page (`detail`) fields; published mutation-test numbers |
+| 2. Build without AI | **Done** | Builder with no LLM; `--like`; preview and single question; named status values kept; single-class fallbacks; lists found through their parent when rows share no class; records split over two neighbours; table headings as column names; pages with no ids or classes; column names from `itemprop`, test markers, link targets, units and labels; selectors built on test markers instead of generated class names; card layouts with different markers grouped into one list; optional AI (`--ai`, `--ask`) that returns a validated recipe | `edit` with point-and-click; removing the older builder's code |
+| 3. Fetch ladder | Partly done | HTTP first, browser fallback (also when HTTP is refused), one browser per run; "load more" and infinite scroll; `--login` with a saved session; item pages read JSON-LD and meta tags; **lists read from data embedded in the page** (`__NEXT_DATA__`, JSON-LD item lists, `var data = [...]`) before any browser is started; frames of the same site followed | Using a discovered API (data fetched after the page opens); data written as JavaScript code |
+| 4. Self-healing | **Done for lists** | Repair by re-finding the data and matching fields against remembered records; verified when known items are found again; refused when a required field cannot be found; history kept in the recipe; embedded-data lists followed when their key is renamed | Repair of item-page (`detail`) fields; published mutation-test numbers |
 | 5. Quality and change detection | Mostly done | Run memory; "N new, N changed, N removed"; checks and exit codes | A per-field quality report; alerts |
 | Item pages (was "list → detail", §10 #9) | **Done** | `--follow`: labelled rows, JSON-LD, heading, description; four pages at a time | Repair of these fields |
 
@@ -368,42 +369,52 @@ checks:
 | Lobsters | Right, 25 |
 | Project Gutenberg search | Right, 25 |
 | dev.to | Right, 17 |
-| BBC News | Right, 47 (but the container is a generated class name) |
+| BBC News | Right, 47, through `div[data-testid$="-card"]` |
 | Wikipedia population table | Right, 240, via browser after HTTP 403 |
 | Real Python | Right, 18, via browser after HTTP 403 |
+| scrapethissite frames | Right, 14, read from the frame |
 | quotes.toscrape.com/tableful | Partly: rows found, quote and tags alternate in one column |
-| scrapethissite frames | Wrong: data is in an iframe |
 | PyPI search | Nothing: bot check |
 | Stack Overflow | Nothing: refused over HTTP and in the browser |
 
-**10 right, 1 partly, 3 not.** The first version of the builder got 4 of these right. Pages it
-*was* developed against (books.toscrape.com, quotes.toscrape.com, Hacker News front page, a
-JavaScript-only page, an infinite-scroll page) also work; Hacker News no longer needs `--like`.
+**11 right, 1 partly, 2 not.** The first version of the builder got 4 of these right, the
+third pass 10. Pages it *was* developed against (books.toscrape.com, quotes.toscrape.com,
+Hacker News front page, a JavaScript-only page, an infinite-scroll page) also work.
 
-Finding the list takes about a second or less on every page above. The largest (Wikipedia, 1.7 MB) took
-11 seconds until the page was indexed once instead of being searched per question; it now takes 1.
+Finding the list takes about a second or less on every page above. The largest (Wikipedia,
+1.7 MB) took 11 seconds until the page was indexed once instead of being searched per question.
+
+What changed in the fourth pass, set against the tools in §2:
+
+| Gap | Who was ahead | Now |
+|---|---|---|
+| Column names like `text_2`, `number` | Tools that ask a model to name things (Crawl4AI, ScrapeGraphAI) | Named from the page: GitHub trending gives `description, programming_language, stargazers, forks, stars_today` with no AI |
+| Selectors built on generated class names | Scrapling (adaptive relocation), Playwright-style test ids | Test markers preferred, generated names refused; the BBC recipe no longer rests on `div.jeApUG` |
+| JavaScript pages need a browser | Firecrawl, Crawl4AI (render everything) | Embedded data read first: quotes.toscrape.com/js gives 100 rows over 10 pages by plain HTTP |
+| Data inside a frame | Browser-based tools | The same-site frame is followed |
+| Ten commands in `--help` | Any small CLI | Six |
 
 What these runs do **not** show:
 
-- Column names are often generic (`text`, `text_2`, `number`) on sites with utility or
-  generated classes. The values are right; the names need a hand edit or `--ai`.
+- Where the page says nothing about a value, the column is still `text` or `number`.
 - Self-repair was exercised by damaging a saved recipe's selectors. It cannot be tested against
   a real redesign of someone else's site.
 - `--ai` and `--ask` were tested with a stand-in model, not a live service.
 - `--login` was tested with a scripted sign-in on a local page, not a real account.
+- Embedded data was tried on one live page; the rest is from constructed pages.
 
 #### What to do next, in order of value
 
-1. **Column names on class-poor sites.** Use nearby labels ("Stars:", `aria-label`, `title`,
-   `itemprop`, `data-*` names) before falling back to `text_2`.
-2. **Lists from embedded data.** Read `__NEXT_DATA__` / JSON-LD item lists directly (§10 #1):
-   no selectors to break, and it covers many JavaScript sites without a browser.
-3. **Frames.** Follow a page whose content is a single iframe into that frame.
-4. **`edit`.** Rename, drop and add fields without opening the YAML.
-5. **Retire the old commands** (`build`, `list`, `resume`, `clean`) or move them behind the
-   `ai` extra, so `--help` shows four commands.
+1. **One live check each** of `--ai` with a real key and `--login` with a real account.
+2. **Use the site's API** when the list is fetched after the page opens (§10 #7): capture the
+   response in the browser once, then call it with plain HTTP on later runs.
+3. **`edit`.** Rename, drop and add fields without opening the YAML.
+4. **A second link rung** when a site marks some cards' links differently.
+5. **Remove the old builder's code** (it is hidden, not gone) or move it behind the `ai` extra.
 6. **Repair of item-page fields**, and published numbers for repair (healed / refused / wrong).
-7. **One live check each** of `--ai` with a real key and `--login` with a real account.
+7. **Publish**: version 2.0.0, PyPI, a short demo of a repair.
+
+Bot protection stays out of scope on purpose (§10, "Not worth borrowing").
 
 ### Phase 0 — Quick wins (days)
 - Remove the artificial sleeps in `_progress_step`; show real step status instead.

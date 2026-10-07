@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 from scrapewizard.engine.selector_engine import is_stable_class, is_stable_id
 from scrapewizard.recipe.embedded import find_lists
-from scrapewizard.recipe.extract import extract_records, parse
+from scrapewizard.recipe.extract import extract_records, parse, read_value
 from scrapewizard.recipe.model import Field, Recipe
 from scrapewizard.recipe.types import clean_text, infer_type
 from scrapewizard.recon.pagination import CSS_SAFE_RE, PaginationDetector
@@ -1086,12 +1086,17 @@ def _widen(chosen: _Candidate, candidates: List[_Candidate]) -> _Candidate:
     A news page lays its cards out in several ways, each with its own marker.
     One layout scores best because its cards are the most alike, but the list a
     person wants is all the cards. A larger block qualifies when it contains
-    every chosen item and reads nearly all the same fields the same way. Rows
-    of another kind (a table's spacer rows) do not have those fields, so a
-    block that merely surrounds the chosen one does not qualify.
+    every chosen item and reads nearly all the same fields the same way, and
+    the items it adds have the record's main value too. Rows of another kind
+    (a table's spacer rows, a banner between cards) do not, so a block that
+    merely surrounds the chosen one does not qualify.
     """
     mine = {id(item) for item in chosen.items}
     wanted = {f.selectors[0] for f in chosen.fields}
+    readable = [f for f in chosen.fields if f.type not in ("url", "image")]
+    if not readable:
+        return chosen
+    main = max(readable, key=lambda f: len(f.values)).selectors[0]   # the value most items have
     best = chosen
     for other in candidates:
         if other is chosen or other.partners is not None or chosen.partners is not None:
@@ -1099,7 +1104,10 @@ def _widen(chosen: _Candidate, candidates: List[_Candidate]) -> _Candidate:
         if len(other.items) <= len(best.items) or not mine < {id(item) for item in other.items}:
             continue
         shared = wanted & {f.selectors[0] for f in other.fields}
-        if len(shared) >= 0.8 * len(wanted):
+        if len(shared) < 0.8 * len(wanted):
+            continue
+        added = [item for item in other.items if id(item) not in mine][:50]
+        if sum(1 for item in added if read_value(item, main)) >= 0.8 * len(added):
             best = other
     return best
 

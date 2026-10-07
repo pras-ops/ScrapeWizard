@@ -609,3 +609,16 @@ def test_only_frames_from_the_same_site_can_hold_the_content():
     assert content_frames(many, page_url) == []  # a page full of frames is not a shell around one list
 
     assert content_frames("<html><body><p>No frames here.</p></body></html>", page_url) == []
+
+
+def test_banners_between_the_cards_do_not_join_the_list():
+    """A larger block that holds the cards plus a few picture-only banners is not the list."""
+    def card(n: int) -> str:
+        return f"""<div class="col-12 col-md-6"><div class="card"><a href="/post/{n}"><img class="card-img-top" src="/img/{n}.png"></a>
+                   <h2 class="card-title"><a href="/post/{n}">A tutorial with a title, number {n}</a></h2>
+                   <span class="card-date">Oct {n:02d}, 2026</span></div></div>"""
+    banner = '<div class="col-12"><div class="card"><a href="/join"><img class="card-img-top" src="/img/ad.png"></a></div></div>'
+    cells = "".join(card(n) + (banner if n % 5 == 0 else "") for n in range(1, 19))
+    result = build_recipe(f"<html><body><main><div class='row'>{cells}</div></main></body></html>", "https://learn.test/")
+    assert len(result.records) == 18
+    assert all(record["title"] for record in result.records)

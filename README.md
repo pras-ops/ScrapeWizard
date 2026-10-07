@@ -40,8 +40,17 @@ the fields, and saves two files in the folder you are in: the data, and a small 
 
 *   **No setup, no AI key.** The page is analysed locally.
 *   **Plain HTTP first.** A browser is started only when a page needs JavaScript to show its data.
+*   **Data embedded in the page.** Many JavaScript sites ship their list as JSON inside the page
+    (`__NEXT_DATA__`, JSON-LD, `var data = [...]`). That is read directly: no browser, and no
+    selectors to break.
 *   **Typed, named fields.** Prices, numbers, dates, links and images are recognised and named.
     Each link is named after the text it belongs to (`url`, `author_url`, `comments_url`).
+*   **Names from the page, not from a model.** Where class names say nothing, columns are named
+    from what the page says: `itemprop`, test markers, where a link goes (`.../stargazers`),
+    the words after a number ("12 stars today"), "3 hours ago" (`age`).
+*   **Selectors that last.** Test markers (`data-testid`) are preferred, and class names made up
+    by a build tool (`jeApUG`) are not used.
+*   **Frames.** If the list sits in a frame of the same site, it is read from the frame.
 *   **Tables.** The heading row becomes the column names. Works on tables with no classes at all.
 *   **Records in two parts.** A title row followed by a details row (Hacker News), or a `dt`
     followed by its `dd` (arXiv), is read as one row.
@@ -85,6 +94,18 @@ detail:                       # only with --follow
 Each field has a list of selectors tried in order. `@attr` reads an attribute instead of the text.
 Item-page fields may also read embedded data (`jsonld:offers.price`) or a meta tag (`meta:description`).
 
+When the list comes from data embedded in the page, the container starts with `data:` and the
+fields are paths instead of selectors:
+
+```yaml
+collection:
+  container: data:props.pageProps.products
+  fields:
+    title: {select: [name], type: text}
+    price: {select: [price.amount], type: number}
+    image: {select: [images.0.url], type: image}
+```
+
 Run memory and any saved sign-in are kept in a `.scrapewizard/` folder beside the recipe. That
 folder ignores itself in git.
 
@@ -103,37 +124,46 @@ every row came out.
 | Lobsters | Right: 25 stories |
 | Project Gutenberg search | Right: 25 books |
 | dev.to | Right: 17 posts |
-| BBC News | Right: 47 headlines |
+| BBC News | Right: 47 headlines, through the site's own test markers |
 | Wikipedia, countries by population | Right: 240 rows, columns named from the headings. Plain HTTP was refused; the browser fallback handled it |
 | Real Python | Right: 18 articles, through the browser fallback |
+| scrapethissite.com frames page | Right: 14 rows, read from the frame |
 | quotes.toscrape.com/tableful | Partly: the rows are found, but the quote and its tags alternate in one column |
-| scrapethissite.com frames page | Wrong: the data is inside a frame, so it picks the menu |
 | PyPI search | Nothing: the site answers with a bot check |
 | Stack Overflow questions | Nothing: refused over HTTP and in the browser |
 
-**10 of 14 right, 1 partly, 3 not.** Finding the list takes about a second or less on each,
-including the 1.7 MB Wikipedia page.
+**11 of 14 right, 1 partly, 2 not** (both behind bot protection). Finding the list takes about
+a second or less on each, including the 1.7 MB Wikipedia page.
 
-The weak spot is **column names**, not the data. On sites that use utility or generated class
-names (GitHub, BBC) the title, links, dates and prices are named, and the rest come out as
-`text`, `text_2`, `number`. Three ways to fix that:
+Column names, on a site whose classes are all styling (GitHub trending):
+
+| Before | Now |
+|---|---|
+| `title, text, text_2, number, number_2, text_3` | `title, description, programming_language, stargazers, forks, stars_today` |
+
+Not every column gets a good name. Where the page says nothing about a value, it is still
+`text` or `number`. Three ways to fix that:
 
 *   rename the keys in the recipe file (it is plain YAML),
 *   pass `--ai` to let a model suggest names once, or
 *   pass `--ask "repository, description, language, stars"` to say what you want.
 
+A JavaScript-drawn page (quotes.toscrape.com/js) that used to need a browser now gives all 100
+quotes over 10 pages with plain HTTP, read from the data embedded in each page.
+
 ### Known limits
 
 *   **Bot protection.** Sites that refuse automated browsers (PyPI search, Stack Overflow) are
-    not handled. `--login` is for sites that need an account, not for getting past bot checks.
-*   **Frames.** Data inside an `<iframe>` is not read. Point it at the frame's own address.
-*   **Generated class names.** They are avoided when recognised, but some slip through
-    (`div.jeApUG` on BBC). Such a recipe stops matching at the site's next release; `run` then
-    repairs it from the last run's data.
+    not handled, and this tool does not try to get around them. `--login` is for sites that
+    need an account, not for getting past bot checks.
+*   **Lists loaded from an API after the page opens** are read from the page a browser draws.
+    The API itself is not called directly yet.
+*   **Embedded data** is read only when it is real JSON. Data written as JavaScript code
+    (unquoted keys, Next.js "app router" streams) is not; those pages fall back to the browser.
 *   **Records that alternate in a class-less table** come out as one column.
+*   **One main link per row.** When a site marks some cards' links differently, a few rows can
+    come out without a `url` (4 of 47 on BBC News).
 *   **Self-repair** covers the list and its fields. Item-page fields (`detail`) are not repaired yet.
-*   **Lists delivered only as JSON** (an API behind the page) are read from the rendered page,
-    not from the API.
 *   **Infinite scroll** is detected when more pages are asked for (`--all-pages`, `--pages N`).
 *   **Not verified live:** the AI options were tested with a stand-in model, `--login` with a
     scripted sign-in, and self-repair by damaging a saved recipe. None of the three has been run
@@ -190,14 +220,13 @@ scrapewizard https://example.com/orders --login
 |---|---|
 | `scrapewizard <url>` | Look at a page, preview the data, save it with a recipe. Options: `--like VALUE`, `--follow`, `--pages N`, `--all-pages`, `--format csv\|json\|xlsx`, `--out NAME`, `--yes`, `--browser`, `--login`, `--ai`, `--ask TEXT` |
 | `scrapewizard run RECIPE` | Run a saved recipe again: reports changes, repairs itself if the site changed, exits with an error if its checks fail. Options: `--pages N`, `--all-pages`, `--format`, `--out NAME`, `--no-repair` |
-| `scrapewizard build --url URL` | AI-assisted builder. `--expert` shows debug detail; `--interactive` asks about fields and formats |
-| `scrapewizard setup` | Configure the LLM provider, model and proxy |
-| `scrapewizard login KEY` | Save an LLM API key in the system keyring |
-| `scrapewizard list` | List local scraper projects |
-| `scrapewizard resume PROJECT_ID` | Continue an interrupted build |
 | `scrapewizard doctor` | Check Python, Playwright, config and LLM connectivity |
-| `scrapewizard clean` | Remove old projects and temporary files |
+| `scrapewizard setup` | Only for the optional AI help: choose the provider and model |
+| `scrapewizard login KEY` | Only for the optional AI help: save an API key in the system keyring |
 | `scrapewizard version` | Print the installed version |
+
+The older AI-assisted builder (`build`, `list`, `resume`, `clean`) still works but is no longer
+shown in `--help`.
 
 ---
 
@@ -222,7 +251,7 @@ playwright install chromium
 python -m pytest tests/ -v --ignore=tests/golden_sites
 ```
 
-182 tests, all offline: every page they read is served from the test's own machine. Some start
+202 tests, all offline: every page they read is served from the test's own machine. Some start
 a real browser, which is why the browser install is needed.
 
 ## 📚 More
