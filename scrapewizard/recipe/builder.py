@@ -27,11 +27,22 @@ CHROME_WORDS = {
     "nav", "navbar", "navigation", "menu", "sidebar", "footer", "header", "breadcrumb",
     "breadcrumbs", "pagination", "pager", "toolbar", "cookie", "banner", "social", "share",
 }
+# "subnav", "topnav", "navbar", "main-menu" and the like.
+CHROME_TOKEN_RE = re.compile(r"^(?:(?:sub|top|main|side|site|global|primary|footer)?nav(?:bar|igation)?|\w*menu)$")
+VOWELS = set("aeiouy")
+# A value in a table cell, addressed from its row: ":scope > td:nth-of-type(3)" or deeper inside that cell.
+TABLE_CELL_RE = re.compile(r"^:scope > (t[dh](?::nth-of-type\(\d+\))?)(?= |$)")
 HEADING_RE = re.compile(r"(^|[\s>])h[1-6]([.\s>:]|$)")
 MIN_ITEMS = 3          # fewer repeats than this is not a list
 SAMPLE_SIZE = 12       # items inspected when discovering fields
 MIN_COVERAGE = 0.5     # a field must appear in at least half the sampled items
-MAX_FIELDS = 12
+MAX_FIELDS = 12        # columns in a finished recipe
+DISCOVERED_FIELDS = 24 # fields kept while blocks are still being compared with each other
+# Words in a class name that say what a value is. A class containing one is preferred as the field's name.
+FIELD_WORDS = (
+    "title", "name", "author", "price", "date", "time", "summary", "description", "subject",
+    "rating", "score", "comment", "category", "tag", "location", "company", "salary", "status",
+)
 MAX_TEXT_LENGTH = 500
 MAX_CANDIDATES = 200
 # A value repeated on every item is kept only if it is not one of these controls ...
@@ -71,6 +82,7 @@ class _Candidate:
     items: List[Tag]
     fields: List[_FieldDraft]
     score: float
+    partners: Optional[List[Optional[Tag]]] = None   # element after each item, for paired layouts
 
 
 def _classes(tag: Tag) -> List[str]:
@@ -146,32 +158,64 @@ def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]
         if found:
             yield found
 
-    # 2. Same-tag siblings without classes (plain <li>, <tr>, <div> lists), anchored on an ancestor.
+    # 2. Same-tag siblings (plain <li>, <tr>, <div> lists), reached from an ancestor that can be named.
+    #    All siblings of a tag form one group whether or not some carry a class: the rows of a
+    #    table are its records even when a few are marked "total" or "highlight".
     for parent in soup.find_all(True):
         if parent.name in SKIP_TAGS:
             continue
         by_name: Dict[str, List[Tag]] = defaultdict(list)
         for child in parent.children:
-            if isinstance(child, Tag) and child.name not in SKIP_TAGS and not _stable_classes(child):
+            if isinstance(child, Tag) and child.name not in SKIP_TAGS:
                 by_name[child.name].append(child)
         for name, children in by_name.items():
             if len(children) < MIN_ITEMS:
                 continue
-            path = name
+            key = tuple(id(c) for c in children)
+            if key in seen:
+                continue  # the same elements were already found by their class
+            plain_steps = [name]
+            exact_steps = [name]
             node: Optional[Tag] = parent
-            for _ in range(3):  # climb until an ancestor can be named uniquely
+            for _ in range(6):  # climb until an ancestor can be named uniquely
                 if not isinstance(node, Tag) or node.name in ("html", "[document]"):
                     break
                 anchor = _anchor_selector(node, soup, anchor_cache)
                 if anchor:
-                    found = offer(f"{anchor} > {path}", children)
-                    if found:
-                        yield found
+                    # The short path first. If the page has look-alike blocks (several tables with
+                    # the same classes), the path with positions picks out exactly this one.
+                    # The path is checked by walking child steps from the anchor: asking the
+                    # selector engine instead costs a scan of the anchor's whole subtree per group.
+                    for steps in (plain_steps, exact_steps):
+                        if _same_elements(_follow_steps(node, steps), children):
+                            seen.add(key)
+                            yield f"{anchor} > {' > '.join(steps)}", children
+                            break
                     break
-                path = f"{node.name} > {path}"
+                plain_steps = [node.name] + plain_steps
+                exact_steps = [_positional_step(node)] + exact_steps
                 node = node.parent
-            else:
-                continue
+
+
+def _follow_steps(start: Tag, steps: List[str]) -> List[Tag]:
+    """The elements ``start > step > step ...`` selects, found by walking direct children."""
+    current = [start]
+    for step in steps:
+        name, _, position = step.partition(":nth-of-type(")
+        found: List[Tag] = []
+        for node in current:
+            same = [c for c in node.children if isinstance(c, Tag) and c.name == name]
+            found.extend(same[int(position[:-1]) - 1:int(position[:-1])] if position else same)
+        current = found
+    return current
+
+
+def _positional_step(node: Tag) -> str:
+    """``table`` if it is its parent's only table, else ``table:nth-of-type(2)``."""
+    if not isinstance(node.parent, Tag):
+        return node.name
+    same = [c for c in node.parent.children if isinstance(c, Tag) and c.name == node.name]
+    return node.name if len(same) == 1 else f"{node.name}:nth-of-type({next(i for i, c in enumerate(same, 1) if c is node)})"
 
 
 def _own_text(el: Tag) -> str:
@@ -195,6 +239,7 @@ def _value_nodes(item: Tag) -> Iterable[Tuple[Tag, Optional[str], str]]:
                 yield el, "src", src
         if el.name == "time" and el.get("datetime"):
             yield el, "datetime", el["datetime"]
+            continue  # its visible text is the same date written another way
         title = clean_text(el.get("title")) if el.name == "a" else ""
         if title:
             yield el, "title", title
@@ -227,33 +272,91 @@ def _relative_selector(item: Tag, el: Tag, common_classes: set) -> str:
     return ":scope > " + " > ".join(reversed(parts))
 
 
-def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
+def _partners(items: List[Tag]) -> Optional[List[Optional[Tag]]]:
+    """The element right after each item, when records come as pairs.
+
+    Some pages split one record over two neighbours: ``dt`` then ``dd``, or a
+    title row then a details row. Returns the partner of every item, or None
+    if the items are not laid out that way.
+
+    The item must hold text of its own. Otherwise an empty spacer between
+    records would qualify as "the item", with the real record as its partner.
+    """
+    item_ids = {id(i) for i in items}
+
+    def partner_of(item: Tag) -> Optional[Tag]:
+        sibling = item.find_next_sibling()
+        usable = (
+            isinstance(sibling, Tag)
+            and id(sibling) not in item_ids
+            and sibling.name not in SKIP_TAGS
+            and clean_text(sibling.get_text(" ", strip=True))
+            and len(sibling.find_all(True)) <= MAX_ITEM_ELEMENTS
+            and not any(id(d) in item_ids for d in sibling.find_all(True))
+        )
+        return sibling if usable else None
+
+    sample = items[:SAMPLE_SIZE]
+    if sum(1 for item in sample if clean_text(item.get_text(" ", strip=True))) < 0.8 * len(sample):
+        return None
+    sampled = [partner_of(item) for item in sample]
+    present = [partner for partner in sampled if partner is not None]
+    if len(present) < 0.8 * len(sample) or len({partner.name for partner in present}) != 1:
+        return None
+    # In "dt dd dt dd", each dd is followed by a dt, but that dt starts the NEXT record.
+    # If something of the partner's kind comes before the first item, the items are second halves.
+    before = items[0].find_previous_sibling()
+    if isinstance(before, Tag) and id(before) not in item_ids and before.name == present[0].name \
+            and before.name != items[0].name:
+        return None
+    return sampled + [partner_of(item) for item in items[SAMPLE_SIZE:]]
+
+
+def _discover_fields(items: List[Tag], partners: Optional[List[Optional[Tag]]] = None) -> List[_FieldDraft]:
     sample = items[:SAMPLE_SIZE]
     if sum(len(item.find_all(True)) for item in sample) > MAX_ITEM_ELEMENTS * len(sample):
         return []  # far too large to be one record; inspecting it is slow and pointless
 
     # Classes that vary from item to item (state, rating) must not appear in field selectors.
     class_presence: Counter = Counter()
-    for item in sample:
+    for index, item in enumerate(sample):
         present = set()
-        for el in item.find_all(True):
-            present.update(_stable_classes(el))
+        roots = [item] + ([partners[index]] if partners and partners[index] is not None else [])
+        for root in roots:
+            for el in root.find_all(True):
+                present.update(_stable_classes(el))
         class_presence.update(present)
     common_classes = {c for c, n in class_presence.items() if n >= MIN_COVERAGE * len(sample)}
 
     drafts: Dict[Tuple[str, Optional[str]], _FieldDraft] = {}
     for index, item in enumerate(sample):
-        for position, (el, attr, value) in enumerate(_value_nodes(item)):
-            if position >= MAX_VALUE_NODES:
-                break
-            selector = _relative_selector(item, el, common_classes)
-            key = (selector, attr)
-            draft = drafts.get(key)
-            if draft is None:
-                spec = f"{selector}@{attr}" if attr else selector
-                draft = drafts[key] = _FieldDraft(selectors=[spec], values={}, position=position,
-                                                  attr=attr, tag=el.name)
-            draft.values.setdefault(index, value)
+        # The item itself, then its partner. "+" in a selector means "in the element after the item".
+        roots = [(item, "")]
+        if partners and partners[index] is not None:
+            roots.append((partners[index], "+"))
+        position = 0
+        for root, prefix in roots:
+            for count, (el, attr, value) in enumerate(_value_nodes(root)):
+                if count >= MAX_VALUE_NODES:
+                    break
+                selector = f"{prefix} {_relative_selector(root, el, common_classes)}".strip()
+                key = (selector, attr)
+                draft = drafts.get(key)
+                if draft is None:
+                    spec = f"{selector}@{attr}" if attr else selector
+                    draft = drafts[key] = _FieldDraft(selectors=[spec], values={}, position=position,
+                                                      attr=attr, tag=el.name)
+                draft.values.setdefault(index, value)
+                position += 1
+
+    paired = [key for key in drafts if key[0].startswith("+")]
+    if paired:
+        own = {key for key in drafts if not key[0].startswith("+")}
+        repeated = sum(1 for selector, attr in paired if (selector[1:].strip(), attr) in own)
+        if repeated >= 0.5 * len(paired):
+            # Two neighbouring cards are two records. A pair is a title row and its details row.
+            for key in paired:
+                del drafts[key]
 
     kept: List[_FieldDraft] = []
     for draft in sorted(drafts.values(), key=lambda d: d.position):
@@ -283,7 +386,7 @@ def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
             draft.type = "date"
         else:
             draft.type = infer_type(list(draft.values.values()))
-    return kept[:MAX_FIELDS]
+    return kept[:DISCOVERED_FIELDS]
 
 
 def _add_single_class_fallbacks(draft: _FieldDraft, sample: List[Tag]) -> None:
@@ -294,6 +397,8 @@ def _add_single_class_fallbacks(draft: _FieldDraft, sample: List[Tag]) -> None:
     it picks the same element on every sampled item.
     """
     primary, _, attr = draft.selectors[0].partition("@")
+    if primary.startswith("+"):
+        return  # read from the element after the item; fallbacks are not derived for those
     head, _, last = primary.rpartition(" ")
     tag, *classes = last.split(".")
     if len(classes) < 2 or ":" in last:
@@ -400,15 +505,85 @@ def _only_adds_boilerplate(draft: _FieldDraft, others: List[_FieldDraft]) -> boo
 
 def _class_based_name(selector: str) -> Optional[str]:
     last = re.split(r"[\s>]+", selector.split("@")[0].strip())[-1] if selector.strip() else ""
-    classes = re.findall(r"\.([A-Za-z_][\w-]*)", last)
+    classes = [c for c in re.findall(r"\.([A-Za-z_][\w-]*)", last)
+               if not _looks_generated(c) and not _is_layout_class(c)]
     if not classes:
         return None
-    name = re.sub(r"[^a-z0-9]+", "_", classes[-1].lower()).strip("_")
+    # "list-title mathjax": the class that says what the value is beats the last one.
+    chosen = next((c for c in classes if any(word in c.lower() for word in FIELD_WORDS)), classes[-1])
+    name = re.sub(r"[^a-z0-9]+", "_", chosen.lower()).strip("_")
     return name if len(name) >= 2 and not name.isdigit() else None
 
 
-def _name_fields(fields: List[_FieldDraft], container: str = "") -> None:
+BREAKPOINT_TOKENS = {"xs", "sm", "md", "lg", "xl", "xxl"}
+UTILITY_TOKENS = {"btn", "col", "row", "flex", "float", "grid"}
+UTILITY_HEADS = {
+    "d", "f", "fw", "fs", "lh", "m", "mt", "mb", "ml", "mr", "mx", "my", "p", "pt", "pb", "pl", "pr", "px", "py",
+    "w", "h", "v", "no", "text", "color", "bg", "border", "rounded", "align", "justify", "position", "overflow",
+    "top", "right", "left", "bottom", "hide", "show", "tmp", "is", "has", "js",
+}
+
+
+def _is_layout_class(class_name: str) -> bool:
+    """True for utility classes ("d-md-inline", "fw-medium", "float-sm-right"): styling, not meaning."""
+    lowered = class_name.lower()
+    if any(word in lowered for word in FIELD_WORDS):
+        return False
+    tokens = [t for t in re.split(r"[-_]+", lowered) if t]
+    if not tokens:
+        return True
+    # A prefix only marks a utility when something follows it: "text-muted" yes, plain "text" no.
+    prefixed = len(tokens) >= 2 and tokens[0] in UTILITY_HEADS
+    return prefixed or bool(set(tokens) & (BREAKPOINT_TOKENS | UTILITY_TOKENS))
+
+
+def _looks_generated(class_name: str) -> bool:
+    """True for class names a build tool made up ("jeApUG", "ewmvhb"), which make poor field names."""
+    if re.search(r"[-_]", class_name):
+        return False
+    if sum(1 for c in class_name[1:] if c.isupper()) >= 2:
+        return True
+    longest_run = max((len(run) for run in re.findall(r"[^aeiouy\d]+", class_name.lower())), default=0)
+    vowels = sum(1 for c in class_name.lower() if c in VOWELS)
+    return len(class_name) >= 5 and (longest_run >= 5 or vowels / len(class_name) < 0.2)
+
+
+def _table_columns(row: Tag) -> Dict[str, str]:
+    """For a table row, map each cell's selector step to its column heading.
+
+    ``{"th": "location", "td:nth-of-type(1)": "population"}``. Empty if the row
+    is not in a table, or the table has no simple one-row heading.
+    """
+    table = row.find_parent("table") if row.name == "tr" else None
+    if table is None:
+        return {}
+    first = table.find("tr")
+    if first is None or first is row:
+        return {}
+    headings = first.find_all(["th", "td"], recursive=False)
+    cells = row.find_all(["th", "td"], recursive=False)
+    spans = any(c.get("colspan") not in (None, "1") or c.get("rowspan") not in (None, "1") for c in headings + cells)
+    if len(headings) < 2 or len(headings) != len(cells) or spans or not all(h.name == "th" for h in headings):
+        return {}
+    columns: Dict[str, str] = {}
+    counts = Counter(c.name for c in cells)
+    seen: Counter = Counter()
+    for heading, cell in zip(headings, cells):
+        seen[cell.name] += 1
+        step = cell.name if counts[cell.name] == 1 else f"{cell.name}:nth-of-type({seen[cell.name]})"
+        name = re.sub(r"[^a-z0-9]+", "_", clean_text(heading.get_text(" ", strip=True)).lower()).strip("_")[:40]
+        if name:
+            columns[step] = name
+    return columns
+
+
+def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Optional[Dict[str, str]] = None) -> None:
     by_type = {"money": "price", "image": "image", "url": "url", "date": "date", "email": "email"}
+    columns = columns or {}
+
+    def column_name(f: _FieldDraft) -> Optional[str]:
+        cell = TABLE_CELL_RE.match(f.selectors[0])
+        return columns.get(cell.group(1)) if cell else None
 
     def average_length(f: _FieldDraft) -> float:
         return sum(len(v) for v in f.values.values()) / max(len(f.values), 1)
@@ -422,12 +597,18 @@ def _name_fields(fields: List[_FieldDraft], container: str = "") -> None:
             return 2
         return 1 if re.search(r"(^|[\s>])a([.\s:]|$)", css) else 0
 
-    strongest = max((title_strength(f) for f in fields), default=0)
-    title_field = next((f for f in fields if strongest and title_strength(f) == strongest), None)
+    strongest = max((title_strength(f) for f in fields if not column_name(f)), default=0)
+    title_field = next((f for f in fields if strongest and not column_name(f)
+                        and title_strength(f) == strongest), None)
+    if columns:
+        title_field = None  # a table already names its columns; none of them is "the title"
 
     unnamed = set()
     for f in fields:
         selector = f.selectors[0]
+        if column_name(f) and f.type not in ("url", "image"):
+            f.name = column_name(f)  # the table's own heading beats any guess
+            continue
         if f.type in by_type:
             f.name = by_type[f.type]
             continue
@@ -445,11 +626,14 @@ def _name_fields(fields: List[_FieldDraft], container: str = "") -> None:
                 f.name = f.name[len(prefix):]
                 break
 
-    if title_field is None:
+    if title_field is None and not columns:
         # No heading or link text: call the longest field that has no name of its own the title.
         generic = [f for f in fields if id(f) in unnamed and f.type == "text"]
         if generic:
             max(generic, key=average_length).name = "title"
+
+    _drop_shared_prefix([f for f in fields if id(f) not in unnamed and f.type not in by_type and f.name != "title"])
+    _name_links(fields, unnamed)
 
     used: Counter = Counter()
     for f in fields:
@@ -458,20 +642,90 @@ def _name_fields(fields: List[_FieldDraft], container: str = "") -> None:
             f.name = f"{f.name}_{used[f.name]}"
     # Title first, then readable values, with long links and image addresses last.
     fields.sort(key=lambda f: (f.name != "title", f.type in ("url", "image"), f.position))
+    del fields[MAX_FIELDS:]
+
+
+def _drop_shared_prefix(named: List[_FieldDraft]) -> None:
+    """``list_title, list_authors, list_subjects`` read better as ``title, authors, subjects``."""
+    by_prefix: Dict[str, List[_FieldDraft]] = defaultdict(list)
+    for f in named:
+        head, sep, rest = f.name.partition("_")
+        if sep and len(rest) >= 2:
+            by_prefix[head].append(f)
+    taken = {f.name for f in named}
+    for prefix, group in by_prefix.items():
+        shortened = [f.name[len(prefix) + 1:] for f in group]
+        if len(group) >= 2 and len(set(shortened)) == len(shortened) and not (set(shortened) & (taken - {f.name for f in group})):
+            for f, short in zip(group, shortened):
+                f.name = short
+
+
+def _name_links(fields: List[_FieldDraft], generic: Optional[set] = None) -> None:
+    """Name each link after the text it belongs to, and drop links and images nobody would miss.
+
+    A card often has a link on its title, another on the author and one on the
+    comment count, plus icons. ``url``, ``author_url`` and ``comments_url`` say
+    which is which; ``url_2`` to ``url_6`` do not. A link with no text of its
+    own (an icon) is kept only when the record has no other link. One image is kept.
+    """
+    def css_of(spec: str) -> str:
+        return spec.rpartition("@")[0] if "@" in spec else spec
+
+    text_by_css: Dict[str, _FieldDraft] = {}
+    for f in fields:
+        if f.type not in ("url", "image"):
+            for spec in f.selectors:
+                text_by_css.setdefault(css_of(spec), f)
+
+    kept: List[_FieldDraft] = []
+    spare_links: List[_FieldDraft] = []
+    has_main_link = False
+    has_image = False
+    for f in fields:
+        if f.type == "image":
+            if not has_image:
+                has_image = True
+                kept.append(f)
+            continue
+        if f.type != "url":
+            kept.append(f)
+            continue
+        owner = next((text_by_css[css_of(s)] for s in f.selectors if css_of(s) in text_by_css), None)
+        if owner is None or (generic and id(owner) in generic and owner.name != "title"):
+            spare_links.append(f)  # "text_url" would say nothing about what the link is
+        elif owner.name == "title" and not has_main_link:
+            f.name, has_main_link = "url", True
+            kept.append(f)
+        else:
+            f.name = f"{owner.name}_url"
+            kept.append(f)
+    if not has_main_link and spare_links:
+        spare_links[0].name = "url"
+        kept.append(spare_links[0])
+    fields[:] = kept
 
 
 def _in_page_chrome(item: Tag) -> bool:
+    """True if the block sits in page furniture: navigation, header, footer, sidebar.
+
+    Furniture tags always count. A furniture *word* in a class or id counts
+    unless the block is inside the page's main content landmark: sites do mark
+    up a list of posts as ``<ul class="menu">`` inside ``<section role="main">``.
+    """
+    named_as_furniture = False
     node: Optional[Tag] = item
     while isinstance(node, Tag):
         if node.name in CHROME_TAGS:
             return True
+        if node.name == "main" or node.get("role") == "main":
+            return False
         tokens = set()
         for word in _classes(node) + [node.get("id") or "", node.get("role") or ""]:
             tokens.update(re.split(r"[-_\s]+", str(word).lower()))
-        if tokens & CHROME_WORDS:
-            return True
+        if tokens & CHROME_WORDS or any(CHROME_TOKEN_RE.match(t) for t in tokens if t):
+            named_as_furniture = True
         node = node.parent
-    return False
+    return named_as_furniture
 
 
 def _score(items: List[Tag], fields: List[_FieldDraft]) -> float:
@@ -486,13 +740,30 @@ def _score(items: List[Tag], fields: List[_FieldDraft]) -> float:
     coverage = sum(len(f.values) for f in fields) / (len(fields) * sampled)
     chars = sum(len(v) for f in readable for v in f.values.values()) / sampled
     richness = min(chars, 400) / 400
-    score = (min(len(fields), 8) + 2 * richness) * coverage * math.log2(len(items) + 1)
+    links = len(fields) - len(readable)
+    # A value reachable by a class or tag is a column. One reachable only by counting
+    # ("the 7th div") usually means the block is a mixed section, not a record.
+    named = sum(0.5 if ":nth-of-type(" in f.selectors[0] and not TABLE_CELL_RE.match(f.selectors[0]) else 1.0
+                for f in readable)
+    breadth = min(named, 8) + 0.5 * min(links, 2)
+    if all(f.tag == "a" for f in readable):
+        # Nothing but link text. Seven links in a menu are not seven columns.
+        breadth = min(breadth, 1.5)
+    score = (breadth + 2 * richness) * coverage * math.log2(len(items) + 1)
+    if len(items) <= 4:
+        # Three or four big blocks are usually sections of a page. They still win
+        # when nothing larger competes, so a genuine list of four is not lost.
+        score *= 0.6
     return score * (0.3 if _in_page_chrome(items[0]) else 1.0)
 
 
 def _is_wrapper(outer: _Candidate, inner: _Candidate) -> bool:
     """True if each outer item holds several inner items (a row of cards, not a card)."""
-    if len(inner.items) < 2 * len(outer.items) or len(inner.fields) < 2:
+    if len(inner.items) < 2 * len(outer.items):
+        return False
+    # The inner block must itself look like a record (two or more readable values).
+    # A blog entry holding a title link and an author link is not "a wrapper of links".
+    if sum(1 for f in inner.fields if f.type not in ("url", "image")) < 2:
         return False
     inner_ids = {id(i) for i in inner.items}
     sample = outer.items[:SAMPLE_SIZE]
@@ -509,24 +780,60 @@ def _is_wrapper(outer: _Candidate, inner: _Candidate) -> bool:
     return wrappers >= 0.5 * len(sample)
 
 
-def _prefer_inner(chosen: _Candidate, candidates: List[_Candidate]) -> _Candidate:
-    """If a block only wraps one equally informative block each, use the inner one.
+def _same_records(outer: _Candidate, inner: _Candidate) -> bool:
+    """True if each inner item lies inside the outer block's record at the same position."""
+    if len(outer.items) != len(inner.items):
+        return False
+    for index, inner_item in enumerate(inner.items):
+        roots = [outer.items[index]]
+        if outer.partners and outer.partners[index] is not None:
+            roots.append(outer.partners[index])
+        if not any(root is not inner_item and root in inner_item.parents for root in roots):
+            return False
+    return True
 
-    ``li.col-xs-6 > article.product_pod``: both give the same records, but the
-    inner element is named for what it is and survives layout-grid changes.
+
+def _share_covered(holder: _Candidate, other: _Candidate) -> float:
+    """Share of ``other``'s fields whose values ``holder`` also has."""
+    if not other.fields:
+        return 1.0
+    return sum(1 for f in other.fields if any(h.values == f.values for h in holder.fields)) / len(other.fields)
+
+
+def _settle_extent(chosen: _Candidate, candidates: List[_Candidate]) -> _Candidate:
+    """Choose between nested blocks that describe the same records, by what each one holds.
+
+    Outward: a block that contains this one and adds fields is the fuller
+    record. A repository card holds a "stars and forks" line; the card is the
+    record, the line is not.
+
+    Inward: a block inside this one that loses no field has the cleaner
+    selector. ``li.col-xs-6 > article.product_pod``: same data, but the inner
+    element is named for what it is.
     """
-    while True:
-        chosen_fields = len(chosen.fields)
-        inner = None
-        for other in candidates:
-            if other is chosen or len(other.items) != len(chosen.items) or len(other.fields) < chosen_fields:
-                continue
-            if all(o is not c and c in o.parents for o, c in zip(other.items, chosen.items)):
-                inner = other
-                break
-        if inner is None:
-            return chosen
-        chosen = inner
+    def is_fuller(outer: _Candidate) -> bool:
+        if not _same_records(outer, chosen):
+            return False
+        adds_fields = _share_covered(outer, chosen) >= 0.8 and _share_covered(chosen, outer) < 1.0
+        # One element that encloses a pair and holds the same fields is the simpler recipe.
+        replaces_pair = chosen.partners is not None and outer.partners is None \
+            and _share_covered(outer, chosen) >= 1.0
+        return adds_fields or replaces_pair
+
+    for _ in range(10):  # nesting is never this deep; a bound keeps the loop obviously finite
+        fuller = next((o for o in candidates if o is not chosen and is_fuller(o)), None)
+        if fuller is not None:
+            chosen = fuller
+            continue
+        cleaner = next(
+            (o for o in candidates if o is not chosen and o.partners is None
+             and _same_records(chosen, o) and _share_covered(o, chosen) >= 1.0),
+            None,
+        )
+        if cleaner is None:
+            break
+        chosen = cleaner
+    return chosen
 
 
 def _matches(items: List[Tag], wanted: str) -> bool:
@@ -598,12 +905,15 @@ def rank_candidates(soup: BeautifulSoup, likes: Optional[List[str]] = None) -> L
     for selector, items in _candidate_selectors(soup):
         if len(candidates) >= MAX_CANDIDATES:
             break
-        fields = _discover_fields(items)
+        partners = _partners(items)
+        fields = _discover_fields(items, partners)
         if not fields:
             continue
+        if not any(f.selectors[0].startswith("+") for f in fields):
+            partners = None  # nothing is read from the neighbour, so this is not a paired layout
         score = _score(items, fields)
         if score > 0:
-            candidates.append(_Candidate(selector, items, fields, score))
+            candidates.append(_Candidate(selector, items, fields, score, partners))
     if not candidates:
         return []
 
@@ -619,10 +929,14 @@ def rank_candidates(soup: BeautifulSoup, likes: Optional[List[str]] = None) -> L
     ranked = [c for c in candidates if not any(_is_wrapper(c, other) for other in leaders if other is not c)]
 
     ordered = ranked or candidates
-    first = _prefer_inner(ordered[0], candidates)
+    # The leaders check is cheap but can miss a lower-scored block of real records.
+    # Whatever ends up first is checked against every candidate.
+    while len(ordered) > 1 and any(_is_wrapper(ordered[0], other) for other in candidates if other is not ordered[0]):
+        ordered = ordered[1:]
+    first = _settle_extent(ordered[0], candidates)
     ordered = [first] + [c for c in ordered if c is not first]
     for candidate in ordered:
-        _name_fields(candidate.fields, candidate.selector)
+        _name_fields(candidate.fields, candidate.selector, _table_columns(candidate.items[-1]))
         if likes:
             wanted = [clean_text(like).lower() for like in likes]
             candidate.fields.sort(

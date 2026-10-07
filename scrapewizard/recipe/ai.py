@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from bs4 import Comment, NavigableString, Tag
 
 from scrapewizard.recipe.builder import MIN_ITEMS, BuildResult, default_name, page_pagination
 from scrapewizard.recipe.extract import extract_records, parse

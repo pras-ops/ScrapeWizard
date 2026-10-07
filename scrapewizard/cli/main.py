@@ -2,7 +2,6 @@ import sys
 import typer
 from typer.core import TyperGroup
 from scrapewizard.cli.commands import setup, scrape, utils, recipe
-from scrapewizard.core.logging import Logger
 
 # Ensure Windows/CMD/PowerShell console supports UTF-8/emoji output without crashing
 try:

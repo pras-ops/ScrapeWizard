@@ -47,7 +47,17 @@ def split_selector(spec: str) -> Tuple[str, Optional[str]]:
 
 
 def read_value(item: Tag, spec: str) -> Optional[str]:
-    """Read one value from an item. Returns None if nothing matches."""
+    """Read one value from an item. Returns None if nothing matches.
+
+    A spec starting with ``+`` reads from the element right after the item,
+    for layouts that split one record over two neighbours (``dt`` + ``dd``,
+    or a title row followed by a details row).
+    """
+    if spec.startswith("+"):
+        item = item.find_next_sibling()
+        if item is None:
+            return None
+        spec = spec[1:].strip()
     css, attr = split_selector(spec)
     try:
         target = item if not css else item.select_one(css)
