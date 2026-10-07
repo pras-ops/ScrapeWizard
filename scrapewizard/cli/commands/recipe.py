@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from scrapewizard.recipe.ai import AIUnavailable, propose_recipe, rename_fields
 from scrapewizard.recipe.builder import BuildResult, build_recipe
 from scrapewizard.recipe.detail import build_detail_fields
 from scrapewizard.recipe.extract import RunResult, run_recipe
@@ -77,17 +78,39 @@ def choose_pages(has_more: bool, read: Callable[[str], str] = input) -> Optional
     return 1
 
 
-def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool) -> BuildResult:
-    """Fetch the page the cheapest way that works and build a recipe from it."""
+def _ai_recipe(html: str, url: str, want: Optional[str], mode: str) -> Optional[BuildResult]:
+    """Ask the configured AI model for a recipe. A missing key stops with how to set one."""
+    try:
+        return propose_recipe(html, url, want=want, fetch_mode=mode)
+    except AIUnavailable as e:
+        raise _fail(str(e))
+
+
+def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
+           use_ai: bool = False, ask: Optional[str] = None) -> BuildResult:
+    """Fetch the page the cheapest way that works and build a recipe from it.
+
+    Without AI the page is analysed locally. ``ask`` (what the user wants, in
+    words) sends the page to the AI model instead. ``use_ai`` lets the model
+    try only when local analysis finds nothing.
+    """
     host = urlparse(url).hostname
     console.print(f"Looking at {host} ...")
     http_error: Optional[FetchError] = None
+    html: Optional[str] = None
+
+    def find(page: str, mode: str) -> Optional[BuildResult]:
+        if ask:
+            return _ai_recipe(page, url, ask, mode)
+        return build_recipe(page, url, likes=likes, name=name, fetch_mode=mode)
 
     if not force_browser:
         try:
-            result = build_recipe(fetch_http(url), url, likes=likes, name=name, fetch_mode="http")
+            html = fetch_http(url)
+            result = find(html, "http")
             if result:
-                console.print(f"Found {len(result.records)} items. No browser needed.")
+                console.print(f"Found {len(result.records)} items with AI help." if ask
+                              else f"Found {len(result.records)} items. No browser needed.")
                 return result
         except FetchError as e:
             if not e.browser_may_help:
@@ -102,7 +125,8 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool)
 
     try:
         with BrowserSession() as session:
-            result = build_recipe(session.open(url), url, likes=likes, name=name, fetch_mode="browser")
+            html = session.open(url)
+            result = find(html, "browser")
             if result and not result.has_more:
                 _detect_scrolling(session, result)
     except FetchError as e:
@@ -112,11 +136,22 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool)
         console.print(f"Found {len(result.records)} items (the page needed a browser to load).")
         return result
 
+    if ask:
+        raise _fail("The AI model could not find that on the page.",
+                    "Try describing it differently, or name a value you can see: --like \"...\"")
+    if use_ai and html and not likes:
+        console.print("Local analysis found no list. Asking the AI model ...")
+        result = _ai_recipe(html, url, None, "browser")
+        if result:
+            console.print(f"Found {len(result.records)} items with AI help.")
+            return result
+        raise _fail("The AI model could not find a repeating list on this page either.")
     if likes:
         raise _fail("Couldn't find a list containing those example values.",
                     "Check the values are visible on the page, exactly as typed.")
     raise _fail("Couldn't find a repeating list on this page.",
-                'Try:  scrapewizard <url> --like "a value you can see on the page"')
+                'Try:  scrapewizard <url> --like "a value you can see on the page"\n'
+                "  or: scrapewizard <url> --ai   (needs an AI key or a local model)")
 
 
 def _detect_scrolling(session: BrowserSession, result: BuildResult) -> None:
@@ -251,16 +286,29 @@ def get(
     yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask; save with the defaults."),
     follow: bool = typer.Option(False, "--follow", help="Also open each item's own page and collect what it holds."),
     browser: bool = typer.Option(False, "--browser", help="Load the page in a browser even if plain HTTP works."),
+    ai: bool = typer.Option(False, "--ai", help="Let an AI model help: better column names, and a second try if no list is found."),
+    ask: Optional[str] = typer.Option(None, "--ask", help='Say what you want in words and let an AI model find it, e.g. "job titles and salaries".'),
 ) -> None:
     """Look at a page, preview the data on it, and save it with a recipe.
 
     No AI key is needed. Shorthand: scrapewizard <url>
+
+    --ai and --ask are optional and use the model set up with 'scrapewizard setup'.
+    The model is used once, here, to write the recipe. Running a recipe never uses AI.
     """
     if fmt not in FORMATS:
         raise _fail(f"Unknown format '{fmt}'.", f"Use one of: {', '.join(FORMATS)}")
     url = _normalise_url(url)
-    result = _build(url, list(like or []), None, browser)
+    result = _build(url, list(like or []), None, browser, use_ai=ai or bool(ask), ask=ask)
     recipe = result.recipe
+    if ai and not ask:
+        try:
+            renames = rename_fields(recipe, result.records)
+        except AIUnavailable as e:
+            console.print(f"{e} Keeping the names found locally.")
+        else:
+            for old, new in renames.items():
+                console.print(f"AI renamed a column: {old} -> {new}")
 
     console.print()
     _show_preview(result.records)

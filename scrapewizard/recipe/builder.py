@@ -551,8 +551,8 @@ def default_name(url: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "_", name).strip("_") or "data"
 
 
-def _to_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str, name: Optional[str], fetch_mode: str):
-    fields = [Field(name=f.name, select=f.selectors, type=f.type) for f in candidate.fields]
+def page_pagination(soup: BeautifulSoup, url: str) -> Tuple[Dict[str, Any], Optional[str]]:
+    """The recipe's pagination rule for this page, and the next page's address if it has one."""
     detected = PaginationDetector(soup, url).detect()
     next_url = detected.get("next_url")
     if next_url and detected["type"] == "next_button" and detected.get("selector"):
@@ -569,6 +569,12 @@ def _to_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str, name: Optio
         }
     else:
         pagination = {"type": "none"}
+    return pagination, next_url
+
+
+def _to_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str, name: Optional[str], fetch_mode: str):
+    fields = [Field(name=f.name, select=f.selectors, type=f.type) for f in candidate.fields]
+    pagination, next_url = page_pagination(soup, url)
     recipe = Recipe(
         name=name or default_name(url),
         url=url,
