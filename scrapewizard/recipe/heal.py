@@ -10,6 +10,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from scrapewizard.recipe.builder import MIN_ITEMS, candidate_recipe, rank_candidates
+from scrapewizard.recipe.embedded import DATA_PREFIX, find_lists
 from scrapewizard.recipe.extract import DEFAULT_REQUIRED_COVERAGE, extract_records, parse
 from scrapewizard.recipe.model import Field, Recipe
 
@@ -146,15 +147,22 @@ def repair(recipe: Recipe, html: str, url: str, state: Optional[Dict[str, Any]])
     sample = (state or {}).get("sample") or []
     required = list(recipe.checks.get("required", []) or [])
 
-    candidates = rank_candidates(soup, _examples(recipe, sample)) if sample else []
+    examples = _examples(recipe, sample) if sample else []
+    candidates = rank_candidates(soup, examples) if sample else []
     if not candidates:
         candidates = rank_candidates(soup)  # remembered items are gone, or there is no memory
-    if not candidates:
+    options = [candidate_recipe(c, soup, url, recipe.name, recipe.fetch)[0] for c in candidates[:MAX_CANDIDATES_TRIED]]
+    # Lists in the page's embedded data: where a "data:" recipe's list will have moved to,
+    # and the only place to look on a page that JavaScript draws.
+    in_data = find_lists(soup, examples) or find_lists(soup)
+    from_data = [Recipe(name=recipe.name, url=url, container=container, fields=fields, fetch=recipe.fetch)
+                 for container, fields in in_data[:MAX_CANDIDATES_TRIED]]
+    options = from_data + options if recipe.container.startswith(DATA_PREFIX) else options + from_data
+    if not options:
         raise RepairRefused("no repeating list was found on the page")
 
     best: Optional[Tuple[Tuple[int, int, int], Repair]] = None
-    for candidate in candidates[:MAX_CANDIDATES_TRIED]:
-        found, _ = candidate_recipe(candidate, soup, url, recipe.name, recipe.fetch)
+    for found in options:
         found_records = extract_records(soup, found, url)
         if len(found_records) < MIN_ITEMS:
             continue

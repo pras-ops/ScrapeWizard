@@ -9,7 +9,8 @@ from rich.console import Console
 from rich.table import Table
 
 from scrapewizard.recipe.ai import AIUnavailable, propose_recipe, rename_fields
-from scrapewizard.recipe.builder import BuildResult, build_recipe
+from scrapewizard.recipe.builder import BuildResult, build_recipe, content_frames
+from scrapewizard.recipe.embedded import DATA_PREFIX
 from scrapewizard.recipe.detail import build_detail_fields
 from scrapewizard.recipe.extract import RunResult, run_recipe
 from scrapewizard.recipe.extract import parse
@@ -87,6 +88,26 @@ def _ai_recipe(html: str, url: str, want: Optional[str], mode: str) -> Optional[
         raise _fail(str(e))
 
 
+def _inside_frame(html: str, url: str, outer: Optional[BuildResult], likes: List[str],
+                  name: Optional[str]) -> Optional[BuildResult]:
+    """The list inside the page's own frame, when that holds more than the page around it.
+
+    The recipe is written for the frame's address, so later runs go straight there.
+    """
+    best: Optional[BuildResult] = None
+    for address in content_frames(html, url):
+        try:
+            inner = build_recipe(fetch_http(address), address, likes=likes, name=name, fetch_mode="http")
+        except FetchError:
+            continue
+        if inner is not None and (best is None or len(inner.records) > len(best.records)):
+            best = inner
+    if best is None or (outer is not None and len(best.records) < 2 * len(outer.records)):
+        return None
+    console.print(f"The data is inside a frame. Reading it from {best.recipe.url}")
+    return best
+
+
 def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
            use_ai: bool = False, ask: Optional[str] = None) -> BuildResult:
     """Fetch the page the cheapest way that works and build a recipe from it.
@@ -99,6 +120,7 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
     console.print(f"Looking at {host} ...")
     http_error: Optional[FetchError] = None
     html: Optional[str] = None
+    menu_only: Optional[BuildResult] = None   # the plain page showed a list, but only in its navigation
 
     def find(page: str, mode: str) -> Optional[BuildResult]:
         if ask:
@@ -109,9 +131,14 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
         try:
             html = fetch_http(url)
             result = find(html, "http")
+            if not ask:
+                result = _inside_frame(html, url, result, likes, name) or result
+            if result and result.in_menu and not likes:
+                menu_only, result = result, None
             if result:
+                where = " in the page's embedded data" if result.recipe.container.startswith(DATA_PREFIX) else ""
                 console.print(f"Found {len(result.records)} items with AI help." if ask
-                              else f"Found {len(result.records)} items. No browser needed.")
+                              else f"Found {len(result.records)} items{where}. No browser needed.")
                 return result
         except FetchError as e:
             if not e.browser_may_help:
@@ -119,6 +146,8 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
             http_error = e
         if http_error:
             console.print(f"{http_error} Trying a browser ...")
+        elif menu_only:
+            console.print("The plain page only shows a menu. Loading it in a browser ...")
         elif likes:
             console.print("Those values aren't in the plain page. Loading it in a browser ...")
         else:
@@ -128,14 +157,22 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
         with BrowserSession() as session:
             html = session.open(url)
             result = find(html, "browser")
+            if result and menu_only and result.in_menu:
+                result = None  # the browser shows nothing more than the plain page did
             if result and not result.has_more:
                 _detect_scrolling(session, result)
     except FetchError as e:
-        # If plain HTTP was refused too, that message says more about the cause.
-        raise _fail(str(http_error or e))
+        if menu_only is None:
+            # If plain HTTP was refused too, that message says more about the cause.
+            raise _fail(str(http_error or e))
+        result = None
     if result:
         console.print(f"Found {len(result.records)} items (the page needed a browser to load).")
         return result
+    if menu_only:
+        console.print(f"Found {len(menu_only.records)} items. They look like the page's menu: "
+                      "if that is not what you want, name a value you can see with --like.")
+        return menu_only
 
     if ask:
         raise _fail("The AI model could not find that on the page.",

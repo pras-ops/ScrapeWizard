@@ -29,6 +29,12 @@ PAGES = {
     "/page2": page(range(6, 11), "/page3"),
     "/page3": page(range(11, 14)),
     "/about": "<html><body><h1>About</h1><p>Just some words here.</p></body></html>",
+    # A shell page: a short menu, and a frame that holds the real list.
+    "/shell": """<html><body><nav><a class="nav-link" href="/a">Home page</a><a class="nav-link" href="/b">Lessons</a>
+                 <a class="nav-link" href="/c">Questions</a><a class="nav-link" href="/d">Sign in</a></nav>
+                 <iframe src="/shell/content"></iframe>
+                 <iframe src="https://ads.example.net/banner"></iframe></body></html>""",
+    "/shell/content": page(range(20, 32)),
 }
 
 
@@ -78,6 +84,18 @@ def test_url_alone_saves_data_and_recipe_in_the_current_folder(site, in_empty_fo
     assert recipe.container == "div.product"
     assert recipe.fetch == "http"
     assert recipe.pagination["max_pages"] == 1
+
+
+def test_list_inside_a_frame_is_read_from_the_frame(site, in_empty_folder):
+    result = runner.invoke(app, [site + "/shell", "--yes", "--out", "framed"])
+
+    assert result.exit_code == 0, result.output
+    assert "The data is inside a frame." in result.output
+    rows = read_csv(in_empty_folder / "framed.csv")
+    assert len(rows) == 12
+    assert rows[0]["title"] == "Product number 20"
+    # The recipe points at the frame, so running it again goes straight to the data.
+    assert load_recipe(in_empty_folder / "framed.recipe.yaml").url == f"{site}/shell/content"
 
 
 def test_all_pages_follows_the_list_to_the_end(site, in_empty_folder):

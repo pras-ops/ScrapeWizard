@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup, Tag
 
 from scrapewizard.core.logging import log
 from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch
+from scrapewizard.recipe.embedded import DATA_PREFIX, data_items, read_data_value
 from scrapewizard.recipe.model import IN_PLACE_PAGINATION, Field, Recipe, RecipeError
 from scrapewizard.recipe.types import clean_text, convert
 from scrapewizard.recon.pagination import find_next_url
@@ -141,11 +142,20 @@ def extract_detail(soup: BeautifulSoup, fields: List[Field], base_url: str) -> D
 
 
 def extract_records(soup: BeautifulSoup, recipe: Recipe, base_url: str) -> List[Dict[str, Any]]:
-    """Read every item on one page. Items with no values at all are skipped."""
-    try:
-        items = soup.select(recipe.container)
-    except Exception as e:
-        raise RecipeError(f"The container selector is not valid CSS: {recipe.container}") from e
+    """Read every item on one page. Items with no values at all are skipped.
+
+    A container starting with ``data:`` reads the list from JSON embedded in
+    the page instead of from its HTML; the fields are then paths, not selectors.
+    """
+    if recipe.container.startswith(DATA_PREFIX):
+        items: List[Any] = data_items(soup, recipe.container)
+        read = read_data_value
+    else:
+        try:
+            items = soup.select(recipe.container)
+        except Exception as e:
+            raise RecipeError(f"The container selector is not valid CSS: {recipe.container}") from e
+        read = read_value
 
     records = []
     for item in items:
@@ -153,7 +163,7 @@ def extract_records(soup: BeautifulSoup, recipe: Recipe, base_url: str) -> List[
         for f in recipe.fields:
             value = None
             for spec in f.select:  # the selector ladder: first one that yields a value wins
-                value = read_value(item, spec)
+                value = read(item, spec)
                 if value:
                     break
             record[f.name] = convert(value, f.type, base_url)

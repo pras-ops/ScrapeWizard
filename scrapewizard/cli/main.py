@@ -32,13 +32,16 @@ app = typer.Typer(
 # Register commands
 app.command(name="get")(recipe.get)
 app.command(name="run")(recipe.run)
+app.command()(utils.doctor)
+# Only needed for the optional AI help (--ai, --ask).
 app.command()(setup.setup)
 app.command(name="login")(setup.auth)
-app.command(name="build")(scrape.scrape)
-app.command(name="list")(utils.list_projects)
-app.command()(utils.clean)
-app.command()(utils.doctor)
-app.command()(utils.resume)
+# The older AI-assisted builder and its project housekeeping. They still work, but are left out
+# of --help: a new user needs "scrapewizard <url>" and "scrapewizard run", not ten commands.
+app.command(name="build", hidden=True)(scrape.scrape)
+app.command(name="list", hidden=True)(utils.list_projects)
+app.command(hidden=True)(utils.clean)
+app.command(hidden=True)(utils.resume)
 
 VERSION = "1.2.0"
 

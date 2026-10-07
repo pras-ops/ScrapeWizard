@@ -3,7 +3,7 @@
 Each fixture reproduces a page shape that went wrong at some point during
 development against live sites.
 """
-from scrapewizard.recipe.builder import build_recipe, default_name
+from scrapewizard.recipe.builder import build_recipe, content_frames, default_name
 
 URL = "https://shop.test/catalogue/"
 
@@ -592,3 +592,20 @@ def test_microformat_classes_and_a_named_parent_give_names():
     assert "origin" in names
     assert result.records[0]["author"] == "person1"
     assert result.records[0]["origin"] == "site1.test"
+
+
+def test_only_frames_from_the_same_site_can_hold_the_content():
+    page_url = "https://site.test/pages/frames/"
+    one = '<html><body><iframe src="/pages/frames/?frame=i"></iframe><iframe src="https://ads.test/x"></iframe></body></html>'
+    assert content_frames(one, page_url) == ["https://site.test/pages/frames/?frame=i"]
+
+    advert_only = '<html><body><iframe src="https://video.test/embed/1"></iframe></body></html>'
+    assert content_frames(advert_only, page_url) == []
+
+    two = '<html><body><iframe src="/a"></iframe><frame src="/b"><iframe src="/a"></iframe></body></html>'
+    assert content_frames(two, page_url) == ["https://site.test/a", "https://site.test/b"]
+
+    many = "<html><body>" + "".join(f'<iframe src="/widget/{n}"></iframe>' for n in range(9)) + "</body></html>"
+    assert content_frames(many, page_url) == []  # a page full of frames is not a shell around one list
+
+    assert content_frames("<html><body><p>No frames here.</p></body></html>", page_url) == []

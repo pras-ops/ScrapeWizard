@@ -10,11 +10,12 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urljoin, urlparse, urlsplit
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from scrapewizard.engine.selector_engine import is_stable_class, is_stable_id
+from scrapewizard.recipe.embedded import find_lists
 from scrapewizard.recipe.extract import extract_records, parse
 from scrapewizard.recipe.model import Field, Recipe
 from scrapewizard.recipe.types import clean_text, infer_type
@@ -59,6 +60,7 @@ class BuildResult:
     recipe: Recipe
     records: List[Dict[str, Any]]      # what the recipe yields on the sample page
     next_url: Optional[str] = None     # set when the page links to a next page
+    in_menu: bool = False              # the list sits in navigation, a header or a footer
 
     @property
     def has_more(self) -> bool:
@@ -1114,6 +1116,28 @@ def _matches(items: List[Tag], wanted: str) -> bool:
     return False
 
 
+MAX_FRAMES = 4
+
+
+def content_frames(html: str, url: str) -> List[str]:
+    """Addresses of the frames on this page that belong to the same site, in page order.
+
+    Some pages are a shell: a menu, and a frame that holds the actual list. A
+    frame from another host is an advert, a video or a widget, never the data.
+    A page with more frames than a handful is not a shell, and gives nothing.
+    """
+    host = urlparse(url).hostname
+    found: List[str] = []
+    for frame in parse(html).find_all(["iframe", "frame"]):
+        src = (frame.get("src") or "").strip()
+        if not src or src.startswith(("about:", "javascript:", "data:")):
+            continue
+        address = urljoin(url, src)
+        if urlparse(address).hostname == host and address.split("#")[0] != url.split("#")[0]                 and address not in found:
+            found.append(address)
+    return found if len(found) <= MAX_FRAMES else []
+
+
 def default_name(url: str) -> str:
     """A short file-friendly name from the URL's host: books.toscrape.com -> books."""
     host = (urlparse(url).hostname or "data").lower()
@@ -1238,17 +1262,37 @@ def build_recipe(
         A BuildResult, or None if no repeating data could be found.
     """
     soup = parse(html)
-    for candidate in rank_candidates(soup, likes):
-        recipe, next_url = _to_recipe(candidate, soup, url, name, fetch_mode)
+
+    def finished(recipe: Recipe, next_url: Optional[str], in_menu: bool = False) -> Optional[BuildResult]:
         # Accept the recipe only if it really works on the page it was built from.
         records = extract_records(soup, recipe, url)
         if len(records) < MIN_ITEMS:
-            continue
+            return None
         well_filled = [
             f.name for f in recipe.fields
             if f.type not in ("url", "image")
             and sum(1 for r in records if r.get(f.name) is not None) >= 0.95 * len(records)
         ]
         recipe.checks = {"min_records": max(1, len(records) // 2), "required": well_filled[:2]}
-        return BuildResult(recipe=recipe, records=records, next_url=next_url)
-    return None
+        return BuildResult(recipe=recipe, records=records, next_url=next_url, in_menu=in_menu)
+
+    from_html: Optional[BuildResult] = None
+    for candidate in rank_candidates(soup, likes):
+        recipe, next_url = _to_recipe(candidate, soup, url, name, fetch_mode)
+        from_html = finished(recipe, next_url, in_menu=_in_page_chrome(candidate.items[0]))
+        if from_html:
+            break
+    if from_html and not from_html.in_menu:
+        return from_html
+
+    # Nothing in the HTML but perhaps a menu: a page drawn by JavaScript. The list it is
+    # about to draw is often shipped as data in the same response.
+    if fetch_mode == "http":
+        pagination, next_url = page_pagination(soup, url)
+        for container, fields in find_lists(soup, likes):
+            recipe = Recipe(name=name or default_name(url), url=url, container=container, fields=fields,
+                            fetch=fetch_mode, pagination=pagination)
+            from_data = finished(recipe, next_url)
+            if from_data:
+                return from_data
+    return from_html
