@@ -334,19 +334,23 @@ checks:
 
 ## 8. Part B — Improvement plan
 
-### Status (2026-10-07)
+### Status (2026-10-07, second pass)
 
 | Phase | State | Done | Still open |
 |---|---|---|---|
-| 0. Quick wins | Partly done | CSV and pagination defects fixed; timed progress waits removed; URL as a plain argument; files saved in the current folder | Dependency diet; one browser session in the AI builder; the failing hardware-detection test |
-| 1. Recipe and runtime | **Done** | Recipe format with typed fields and selector ladders; HTTP runtime; pagination; de-duplication; checks; `scrapewizard run` | Retiring `list` / `resume` / `clean` |
-| 2. Build without AI | **Mostly done** | Builder finds the list, fields, types and names with no LLM; `--like`; preview and the single question; `--yes` | `edit` with point-and-click; AI as an optional polish step that returns a recipe; removing the old modes |
-| 3. Fetch ladder | Partly done | Plain HTTP first, browser only as fallback; charset-aware decoding | Embedded data (JSON-LD, `__NEXT_DATA__`); using a discovered API |
-| 4. Self-healing | Not started | — | Fingerprints per field; data-verified repair |
-| 5. Quality and change detection | Partly done | Checks and exit codes on `run` | Run-to-run comparison; quality report |
+| 0. Quick wins | Mostly done | CSV and pagination defects fixed; timed progress waits removed; URL as a plain argument; files in the current folder; default install cut from 25 packages to 13, with `ai`, `excel` and `dev` extras | One browser session in the older AI builder; the failing hardware-detection test; lazy loading of the older builder's packages |
+| 1. Recipe and runtime | **Done** | Recipe format, typed fields, selector ladders, HTTP runtime, pagination, de-duplication, checks, `run`, one shared HTTP connection | Retiring `list` / `resume` / `clean` |
+| 2. Build without AI | **Done** | Builder with no LLM; `--like`; preview and single question; named status values kept; single-class fallbacks; optional AI (`--ai`, `--ask`) that returns a validated recipe | `edit` with point-and-click; removing the older builder's modes |
+| 3. Fetch ladder | Partly done | HTTP first, browser fallback, one browser per run; "load more" and infinite scroll; `--login` with a saved session; item pages read JSON-LD and meta tags | Embedded data as the source for a *list* (`__NEXT_DATA__`, JSON-LD item lists); using a discovered API |
+| 4. Self-healing | **Done for lists** | Repair by re-finding the data and matching fields against remembered records; verified when known items are found again; refused when a required field cannot be found; history kept in the recipe | Repair of item-page (`detail`) fields; published mutation-test numbers |
+| 5. Quality and change detection | Mostly done | Run memory; "N new, N changed, N removed"; checks and exit codes | A per-field quality report; alerts |
+| Item pages (was "list → detail", §10 #9) | **Done** | `--follow`: labelled rows, JSON-LD, heading, description; four pages at a time | Repair of these fields |
 
-Tried against live pages: a product grid, a quotes list, a 250-item country list, a table with
-classed cells, a JavaScript-only page (browser fallback) and Hacker News (needs `--like`).
+Tried against live pages: a product grid (with item pages), a quotes list, a 250-item country
+list, a table with classed cells, a JavaScript-only page, an infinite-scroll page (100 items in
+10 loads) and Hacker News (needs `--like`). Self-repair was exercised live by corrupting a saved
+recipe's selectors; it cannot be tested against a real redesign of someone else's site.
+The AI options were tested with a stand-in model, not a live service.
 
 ### Phase 0 — Quick wins (days)
 - Remove the artificial sleeps in `_progress_step`; show real step status instead.

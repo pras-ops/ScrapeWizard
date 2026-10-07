@@ -1,4 +1,5 @@
 """Saving records to a data file."""
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any, Dict, List
@@ -10,6 +11,16 @@ FORMATS = ("csv", "json", "xlsx")
 
 class OutputError(Exception):
     """The data could not be saved. The message is safe to show to the user."""
+
+
+def check_format(fmt: str) -> None:
+    """Raise OutputError now if this format cannot be written, before any page is fetched."""
+    if fmt not in FORMATS:
+        raise OutputError(f"Unknown format '{fmt}'. Use one of: {', '.join(FORMATS)}.")
+    if fmt == "xlsx":
+        missing = [name for name in ("pandas", "openpyxl") if importlib.util.find_spec(name) is None]
+        if missing:
+            raise OutputError(f"Excel export needs: pip install {' '.join(missing)}")
 
 
 def save_records(records: List[Dict[str, Any]], path: Path, fmt: str) -> Path:

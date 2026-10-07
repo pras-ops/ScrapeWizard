@@ -58,6 +58,8 @@ def _ask(client: Any, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
     except RuntimeError as e:
         if "API Key missing" in str(e):
             raise AIUnavailable("AI help needs a key or a local model. Set one up with: scrapewizard setup") from e
+        if "is not installed" in str(e):
+            raise AIUnavailable(str(e)) from e
         raise AIUnavailable(f"The AI request failed ({e}).") from e
     except Exception as e:
         raise AIUnavailable(f"The AI request failed ({type(e).__name__}).") from e

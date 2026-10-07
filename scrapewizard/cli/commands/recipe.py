@@ -16,7 +16,7 @@ from scrapewizard.recipe.extract import parse
 from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch, fetch_http, sign_in
 from scrapewizard.recipe.heal import RepairRefused, repair, what_broke
 from scrapewizard.recipe.model import Recipe, RecipeError, load_recipe, save_recipe
-from scrapewizard.recipe.output import FORMATS, OutputError, save_records
+from scrapewizard.recipe.output import FORMATS, OutputError, check_format, save_records
 from scrapewizard.recipe.state import compare, load_state, save_session, save_state, session_path
 
 console = Console()
@@ -326,8 +326,10 @@ def get(
     --ai and --ask are optional and use the model set up with 'scrapewizard setup'.
     The model is used once, here, to write the recipe. Running a recipe never uses AI.
     """
-    if fmt not in FORMATS:
-        raise _fail(f"Unknown format '{fmt}'.", f"Use one of: {', '.join(FORMATS)}")
+    try:
+        check_format(fmt)  # before fetching anything: a wrong format should not cost a scrape
+    except OutputError as e:
+        raise _fail(str(e))
     url = _normalise_url(url)
     storage: Optional[Dict[str, Any]] = None
     if login:
@@ -428,8 +430,10 @@ def run(
     If the site changed and the recipe stops matching, it is repaired and the
     repair is checked against the data from the last run.
     """
-    if fmt not in FORMATS:
-        raise _fail(f"Unknown format '{fmt}'.", f"Use one of: {', '.join(FORMATS)}")
+    try:
+        check_format(fmt)  # before fetching anything: a wrong format should not cost a scrape
+    except OutputError as e:
+        raise _fail(str(e))
     try:
         recipe = load_recipe(recipe_path)
     except RecipeError as e:
