@@ -398,7 +398,8 @@ def _name_fields(fields: List[_FieldDraft], container: str = "") -> None:
         used[f.name] += 1
         if used[f.name] > 1:
             f.name = f"{f.name}_{used[f.name]}"
-    fields.sort(key=lambda f: (f.name != "title", f.position))
+    # Title first, then readable values, with long links and image addresses last.
+    fields.sort(key=lambda f: (f.name != "title", f.type in ("url", "image"), f.position))
 
 
 def _in_page_chrome(item: Tag) -> bool:

@@ -53,7 +53,8 @@ def test_fields_are_named_typed_and_free_of_noise():
     result = build_recipe(shop_page(), URL)
     fields = {f.name: f for f in result.recipe.fields}
 
-    assert set(fields) == {"title", "price", "url", "image"}
+    # Readable columns first; links and image addresses last.
+    assert list(fields) == ["title", "price", "url", "image"]
     assert fields["price"].type == "money"
     assert fields["url"].type == "url"
     assert fields["image"].type == "image"
@@ -98,7 +99,7 @@ def test_item_with_a_sublist_is_the_record():
     assert result.recipe.container == "div.quote"
     assert len(result.records) == 4
     names = [f.name for f in result.recipe.fields]
-    assert names == ["text", "author", "url", "tags"]
+    assert names == ["text", "author", "tags", "url"]
     assert result.records[1]["author"] == "J.K. Rowling"
     assert result.records[1]["tags"] == "Tags: abilities choices"
 

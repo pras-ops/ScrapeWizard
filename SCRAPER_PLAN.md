@@ -334,6 +334,20 @@ checks:
 
 ## 8. Part B — Improvement plan
 
+### Status (2026-10-07)
+
+| Phase | State | Done | Still open |
+|---|---|---|---|
+| 0. Quick wins | Partly done | CSV and pagination defects fixed; timed progress waits removed; URL as a plain argument; files saved in the current folder | Dependency diet; one browser session in the AI builder; the failing hardware-detection test |
+| 1. Recipe and runtime | **Done** | Recipe format with typed fields and selector ladders; HTTP runtime; pagination; de-duplication; checks; `scrapewizard run` | Retiring `list` / `resume` / `clean` |
+| 2. Build without AI | **Mostly done** | Builder finds the list, fields, types and names with no LLM; `--like`; preview and the single question; `--yes` | `edit` with point-and-click; AI as an optional polish step that returns a recipe; removing the old modes |
+| 3. Fetch ladder | Partly done | Plain HTTP first, browser only as fallback; charset-aware decoding | Embedded data (JSON-LD, `__NEXT_DATA__`); using a discovered API |
+| 4. Self-healing | Not started | — | Fingerprints per field; data-verified repair |
+| 5. Quality and change detection | Partly done | Checks and exit codes on `run` | Run-to-run comparison; quality report |
+
+Tried against live pages: a product grid, a quotes list, a 250-item country list, a table with
+classed cells, a JavaScript-only page (browser fallback) and Hacker News (needs `--like`).
+
 ### Phase 0 — Quick wins (days)
 - Remove the artificial sleeps in `_progress_step`; show real step status instead.
 - Reuse one browser session for probe and recon; make the probe headless by default and go

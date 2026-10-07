@@ -20,7 +20,16 @@ META_CHARSET_RE = re.compile(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([\w-]+)", re.I
 
 
 class FetchError(Exception):
-    """A page could not be retrieved. The message is safe to show to the user."""
+    """A page could not be retrieved. The message is safe to show to the user.
+
+    ``browser_may_help`` is True when the site answered but refused a plain
+    request, which a real browser sometimes gets past. It is False when the
+    site could not be reached at all.
+    """
+
+    def __init__(self, message: str, browser_may_help: bool = False):
+        super().__init__(message)
+        self.browser_may_help = browser_may_help
 
 
 def decode_body(response: httpx.Response) -> str:
@@ -48,7 +57,10 @@ def fetch_http(url: str, timeout: float = 20.0) -> str:
     except httpx.HTTPError as e:
         raise FetchError(f"Could not connect to the site ({type(e).__name__}).") from e
     if response.status_code in (401, 403, 429):
-        raise FetchError(f"The site refused the request (HTTP {response.status_code}). It may block automated access.")
+        raise FetchError(
+            f"The site refused the request (HTTP {response.status_code}). It may block automated access.",
+            browser_may_help=True,
+        )
     if response.status_code >= 400:
         raise FetchError(f"The site answered with an error (HTTP {response.status_code}).")
     return decode_body(response)

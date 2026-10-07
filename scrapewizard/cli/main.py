@@ -1,6 +1,7 @@
 import sys
 import typer
-from scrapewizard.cli.commands import setup, scrape, utils
+from typer.core import TyperGroup
+from scrapewizard.cli.commands import setup, scrape, utils, recipe
 from scrapewizard.core.logging import Logger
 
 # Ensure Windows/CMD/PowerShell console supports UTF-8/emoji output without crashing
@@ -13,13 +14,25 @@ except Exception:
     pass
 
 
+class UrlFirstGroup(TyperGroup):
+    """Lets `scrapewizard <url>` work as shorthand for `scrapewizard get <url>`."""
+
+    def parse_args(self, ctx, args):
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            args = ["get", *args]
+        return super().parse_args(ctx, args)
+
+
 app = typer.Typer(
     name="scrapewizard",
-    help="Agentic Web Scraper Builder",
+    cls=UrlFirstGroup,
+    help="Get data from web pages. Start with: scrapewizard <url>",
     add_completion=False
 )
 
 # Register commands
+app.command(name="get")(recipe.get)
+app.command(name="run")(recipe.run)
 app.command()(setup.setup)
 app.command(name="login")(setup.auth)
 app.command(name="build")(scrape.scrape)
