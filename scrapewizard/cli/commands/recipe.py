@@ -10,9 +10,11 @@ from rich.table import Table
 
 from scrapewizard.recipe.builder import BuildResult, build_recipe
 from scrapewizard.recipe.extract import RunResult, run_recipe
-from scrapewizard.recipe.fetch import FetchError, fetch_browser, fetch_http
+from scrapewizard.recipe.fetch import FetchError, fetch, fetch_browser, fetch_http
+from scrapewizard.recipe.heal import RepairRefused, repair, what_broke
 from scrapewizard.recipe.model import Recipe, RecipeError, load_recipe, save_recipe
 from scrapewizard.recipe.output import FORMATS, OutputError, save_records
+from scrapewizard.recipe.state import compare, load_state, save_state
 
 console = Console()
 
@@ -112,7 +114,8 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool)
                 'Try:  scrapewizard <url> --like "a value you can see on the page"')
 
 
-def _save(records: List[Dict[str, Any]], recipe: Optional[Recipe], name: str, fmt: str) -> None:
+def _save(records: List[Dict[str, Any]], recipe: Optional[Recipe], name: str, fmt: str) -> Optional[Path]:
+    """Save the data and, if given, the recipe. Returns the recipe's path."""
     data_path = Path(f"{name}.{fmt}")
     try:
         save_records(records, data_path, fmt)
@@ -124,6 +127,8 @@ def _save(records: List[Dict[str, Any]], recipe: Optional[Recipe], name: str, fm
         recipe_path = save_recipe(recipe, Path(f"{name}.recipe.yaml"))
         # soft_wrap keeps the command on one line so it can be copied.
         console.print(f"       {recipe_path}   run again with: scrapewizard run {recipe_path}", soft_wrap=True)
+        return recipe_path
+    return None
 
 
 def _output_name(out: Optional[str], fallback: str) -> str:
@@ -191,7 +196,8 @@ def get(
     console.print()
     name = _output_name(out, recipe.name)
     recipe.name = Path(name).name  # the recipe carries the name its files were saved under
-    _save(records, recipe, name, fmt)
+    recipe_path = _save(records, recipe, name, fmt)
+    save_state(recipe_path, recipe, records, wanted if has_more else 1)
 
 
 def _recipe_stem(recipe_path: str) -> str:
@@ -209,8 +215,13 @@ def run(
     pages: Optional[int] = typer.Option(None, "--pages", help="Pages to read (default: what the recipe says)."),
     all_pages: bool = typer.Option(False, "--all-pages", help="Follow the list to its last page."),
     out: Optional[str] = typer.Option(None, "--out", "-o", help="File name to save as (without extension)."),
+    no_repair: bool = typer.Option(False, "--no-repair", help="Don't try to repair the recipe if the site changed."),
 ) -> None:
-    """Run a saved recipe again. Exits with an error if its checks fail."""
+    """Run a saved recipe again. Exits with an error if its checks fail.
+
+    If the site changed and the recipe stops matching, it is repaired and the
+    repair is checked against the data from the last run.
+    """
     if fmt not in FORMATS:
         raise _fail(f"Unknown format '{fmt}'.", f"Use one of: {', '.join(FORMATS)}")
     try:
@@ -218,21 +229,54 @@ def run(
     except RecipeError as e:
         raise _fail(str(e))
 
+    state = load_state(recipe_path)
     limit = ALL_PAGES if all_pages else pages
-    try:
-        result = _run_pages(recipe, limit) if limit else run_recipe(recipe)
-    except (FetchError, RecipeError) as e:
-        raise _fail(str(e))
+    page_limit = limit or int(recipe.pagination.get("max_pages") or 1)
+
+    def read() -> RunResult:
+        try:
+            return _run_pages(recipe, limit) if limit else run_recipe(recipe)
+        except (FetchError, RecipeError) as e:
+            raise _fail(str(e))
+
+    result = read()
+    problem = what_broke(result.records, recipe, state)
+    if problem and not no_repair:
+        console.print(problem)
+        try:
+            fix = repair(recipe, fetch(recipe.url, recipe.fetch), recipe.url, state)
+        except FetchError as e:
+            raise _fail(str(e))
+        except RepairRefused as e:
+            raise _fail(f"It could not be repaired safely: {e}.",
+                        f"Nothing was saved. Build a fresh recipe with: scrapewizard {recipe.url}")
+        for change in fix.changes:
+            console.print(f"Repaired: {change}", soft_wrap=True)
+        if fix.verified:
+            console.print(f"Checked:  {len(fix.records)} rows on the first page, "
+                          f"{fix.matched} of them known from the last run.")
+        else:
+            console.print("Checked:  the fields match by name and type. "
+                          "No remembered items were on the page to compare with.")
+        recipe = fix.recipe
+        save_recipe(recipe, recipe_path)
+        console.print("Recipe updated.")
+        result = read()
+        problem = what_broke(result.records, recipe, state)
 
     page_word = "page" if result.pages == 1 else "pages"
-    console.print(f"{recipe.name}   {len(result.records)} rows from {result.pages} {page_word}")
+    changes = compare(state, result.records, page_limit)
+    summary = f"{recipe.name}   {len(result.records)} rows from {result.pages} {page_word}"
+    console.print(f"{summary}   {changes}" if changes else summary, soft_wrap=True)
     if not result.records:
         raise _fail("No records were found, so nothing was saved.",
                     "The site may have changed. Build a fresh recipe with: scrapewizard " + recipe.url)
 
     _save(result.records, None, _output_name(out, _recipe_stem(recipe_path)), fmt)
-    if result.failures:
-        for failure in result.failures:
+    if result.failures or problem:
+        for failure in result.failures or [problem]:
             console.print(f"[red]Check failed:[/red] {failure}")
         raise typer.Exit(code=1)
+    # Only a run that passed its checks becomes the memory the next run is compared with.
+    save_state(recipe_path, recipe, result.records, page_limit)
     console.print("       all checks passed")

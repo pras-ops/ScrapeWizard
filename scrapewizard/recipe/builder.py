@@ -567,6 +567,57 @@ def _to_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str, name: Optio
     return recipe, next_url
 
 
+def rank_candidates(soup: BeautifulSoup, likes: Optional[List[str]] = None) -> List[_Candidate]:
+    """Every repeating block on the page that could be the data, best first, with named fields.
+
+    With ``likes``, only blocks containing the most example values are returned;
+    an empty list means none of the values is on the page.
+    """
+    likes = [like for like in (likes or []) if clean_text(like)]
+
+    candidates: List[_Candidate] = []
+    for selector, items in _candidate_selectors(soup):
+        if len(candidates) >= MAX_CANDIDATES:
+            break
+        fields = _discover_fields(items)
+        if not fields:
+            continue
+        score = _score(items, fields)
+        if score > 0:
+            candidates.append(_Candidate(selector, items, fields, score))
+    if not candidates:
+        return []
+
+    if likes:
+        hits = {id(c): sum(1 for like in likes if _matches(c.items, like)) for c in candidates}
+        best = max(hits.values())
+        if best == 0:
+            return []  # nothing on the page contains the example values
+        candidates = [c for c in candidates if hits[id(c)] == best]
+
+    candidates.sort(key=lambda c: c.score, reverse=True)
+    leaders = candidates[:8]
+    ranked = [c for c in candidates if not any(_is_wrapper(c, other) for other in leaders if other is not c)]
+
+    ordered = ranked or candidates
+    first = _prefer_inner(ordered[0], candidates)
+    ordered = [first] + [c for c in ordered if c is not first]
+    for candidate in ordered:
+        _name_fields(candidate.fields, candidate.selector)
+        if likes:
+            wanted = [clean_text(like).lower() for like in likes]
+            candidate.fields.sort(
+                key=lambda f: not any(w in v.lower() for w in wanted for v in f.values.values())
+            )
+    return ordered
+
+
+def candidate_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str,
+                     name: Optional[str] = None, fetch_mode: str = "http") -> Tuple[Recipe, Optional[str]]:
+    """Turn one candidate block into a recipe. Returns (recipe, next page URL or None)."""
+    return _to_recipe(candidate, soup, url, name, fetch_mode)
+
+
 def build_recipe(
     html: str,
     url: str,
@@ -587,41 +638,7 @@ def build_recipe(
         A BuildResult, or None if no repeating data could be found.
     """
     soup = parse(html)
-    likes = [like for like in (likes or []) if clean_text(like)]
-
-    candidates: List[_Candidate] = []
-    for selector, items in _candidate_selectors(soup):
-        if len(candidates) >= MAX_CANDIDATES:
-            break
-        fields = _discover_fields(items)
-        if not fields:
-            continue
-        score = _score(items, fields)
-        if score > 0:
-            candidates.append(_Candidate(selector, items, fields, score))
-    if not candidates:
-        return None
-
-    if likes:
-        hits = {id(c): sum(1 for like in likes if _matches(c.items, like)) for c in candidates}
-        best = max(hits.values())
-        if best == 0:
-            return None  # nothing on the page contains the example values
-        candidates = [c for c in candidates if hits[id(c)] == best]
-
-    candidates.sort(key=lambda c: c.score, reverse=True)
-    leaders = candidates[:8]
-    ranked = [c for c in candidates if not any(_is_wrapper(c, other) for other in leaders if other is not c)]
-
-    ordered = ranked or candidates
-    ordered = [_prefer_inner(ordered[0], candidates)] + ordered
-    for candidate in ordered:
-        _name_fields(candidate.fields, candidate.selector)
-        if likes:
-            wanted = [clean_text(like).lower() for like in likes]
-            candidate.fields.sort(
-                key=lambda f: not any(w in v.lower() for w in wanted for v in f.values.values())
-            )
+    for candidate in rank_candidates(soup, likes):
         recipe, next_url = _to_recipe(candidate, soup, url, name, fetch_mode)
         # Accept the recipe only if it really works on the page it was built from.
         records = extract_records(soup, recipe, url)

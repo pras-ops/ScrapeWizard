@@ -38,9 +38,10 @@ class Recipe:
     fetch: str = "http"
     pagination: Dict[str, Any] = field(default_factory=lambda: {"type": "none"})
     checks: Dict[str, Any] = field(default_factory=dict)
+    history: List[Dict[str, str]] = field(default_factory=list)  # repairs made, oldest first
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "name": self.name,
             "url": self.url,
             "fetch": self.fetch,
@@ -51,6 +52,9 @@ class Recipe:
             "pagination": dict(self.pagination),
             "checks": dict(self.checks),
         }
+        if self.history:
+            data["history"] = [dict(entry) for entry in self.history]
+        return data
 
 
 def recipe_from_dict(data: Any) -> Recipe:
@@ -95,6 +99,10 @@ def recipe_from_dict(data: Any) -> Recipe:
     if not isinstance(checks, dict):
         raise RecipeError("'checks' must be a mapping.")
 
+    history = data.get("history") or []
+    if not isinstance(history, list) or not all(isinstance(entry, dict) for entry in history):
+        raise RecipeError("'history' must be a list of entries.")
+
     return Recipe(
         name=str(data["name"]),
         url=str(data["url"]),
@@ -103,6 +111,7 @@ def recipe_from_dict(data: Any) -> Recipe:
         fetch=fetch,
         pagination=dict(pagination),
         checks=dict(checks),
+        history=[{str(k): str(v) for k, v in entry.items()} for entry in history],
     )
 
 

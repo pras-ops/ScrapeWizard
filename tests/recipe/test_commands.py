@@ -127,14 +127,14 @@ def test_run_exits_with_an_error_when_a_check_fails(site, in_empty_folder):
     assert "Check failed: Expected at least 99 records, got 5." in result.output
 
 
-def test_run_saves_nothing_when_the_site_no_longer_matches(site, in_empty_folder):
+def test_without_repair_a_broken_recipe_saves_nothing(site, in_empty_folder):
     runner.invoke(app, [site + "/", "--yes", "--out", "shop"])
     recipe_file = in_empty_folder / "shop.recipe.yaml"
     recipe_file.write_text(recipe_file.read_text(encoding="utf-8").replace("div.product", "div.renamed"),
                            encoding="utf-8")
     (in_empty_folder / "shop.csv").unlink()
 
-    result = runner.invoke(app, ["run", "shop.recipe.yaml"])
+    result = runner.invoke(app, ["run", "shop.recipe.yaml", "--no-repair"])
 
     assert result.exit_code == 1
     assert "No records were found, so nothing was saved." in result.output
