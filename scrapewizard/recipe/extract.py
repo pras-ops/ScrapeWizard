@@ -139,11 +139,13 @@ def run_recipe(
     visited = set()
     url: Optional[str] = recipe.url
     pages = 0
+    stale_pages = 0  # consecutive pages that added nothing new
 
     while url and pages < limit and url not in visited:
         visited.add(url)
         soup = parse(fetcher(url, recipe.fetch))
         page_records = extract_records(soup, recipe, url)
+        before = len(records)
         for record in page_records:
             key = tuple((k, str(v)) for k, v in record.items())
             if key not in seen_records:
@@ -152,7 +154,9 @@ def run_recipe(
         pages += 1
         if on_page:
             on_page(pages, len(records))
-        if not page_records or pages >= limit:
+        # One repeat is tolerated (some sites link page 1 to itself); two in a row is a loop.
+        stale_pages = stale_pages + 1 if len(records) == before else 0
+        if not page_records or stale_pages >= 2 or pages >= limit:
             break
         url = next_page_url(soup, recipe, url)
         if url:
