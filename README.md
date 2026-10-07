@@ -41,6 +41,10 @@ the fields, and saves two files in the folder you are in: the data, and a small 
 *   **No setup, no AI key.** The page is analysed locally.
 *   **Plain HTTP first.** A browser is started only when a page needs JavaScript to show its data.
 *   **Typed, named fields.** Prices, numbers, dates, links and images are recognised and named.
+    Each link is named after the text it belongs to (`url`, `author_url`, `comments_url`).
+*   **Tables.** The heading row becomes the column names. Works on tables with no classes at all.
+*   **Records in two parts.** A title row followed by a details row (Hacker News), or a `dt`
+    followed by its `dd` (arXiv), is read as one row.
 *   **All the pages.** Follows "next" links, numbered pages, "load more" buttons and infinite scroll.
 *   **Item pages.** `--follow` opens each item's own page and adds what it holds: labelled rows,
     embedded structured data, the description.
@@ -84,17 +88,57 @@ Item-page fields may also read embedded data (`jsonld:offers.price`) or a meta t
 Run memory and any saved sign-in are kept in a `.scrapewizard/` folder beside the recipe. That
 folder ignores itself in git.
 
+### How well it works
+
+Measured on 7 October 2026 against 14 public pages that were **not** used while building the
+tool, with no AI and no `--like` hint. "Right" means it chose the list a person would want and
+every row came out.
+
+| Page | Result |
+|---|---|
+| GitHub trending | Right: 12 repositories |
+| python.org blogs | Right: 14 posts |
+| arXiv recent papers | Right: 50 papers, each read from a `dt` and the `dd` after it |
+| Hacker News jobs | Right: 30 jobs |
+| Lobsters | Right: 25 stories |
+| Project Gutenberg search | Right: 25 books |
+| dev.to | Right: 17 posts |
+| BBC News | Right: 47 headlines |
+| Wikipedia, countries by population | Right: 240 rows, columns named from the headings. Plain HTTP was refused; the browser fallback handled it |
+| Real Python | Right: 18 articles, through the browser fallback |
+| quotes.toscrape.com/tableful | Partly: the rows are found, but the quote and its tags alternate in one column |
+| scrapethissite.com frames page | Wrong: the data is inside a frame, so it picks the menu |
+| PyPI search | Nothing: the site answers with a bot check |
+| Stack Overflow questions | Nothing: refused over HTTP and in the browser |
+
+**10 of 14 right, 1 partly, 3 not.** Finding the list takes about a second or less on each,
+including the 1.7 MB Wikipedia page.
+
+The weak spot is **column names**, not the data. On sites that use utility or generated class
+names (GitHub, BBC) the title, links, dates and prices are named, and the rest come out as
+`text`, `text_2`, `number`. Three ways to fix that:
+
+*   rename the keys in the recipe file (it is plain YAML),
+*   pass `--ai` to let a model suggest names once, or
+*   pass `--ask "repository, description, language, stars"` to say what you want.
+
 ### Known limits
 
-*   Layouts that split one item across two separate rows (Hacker News) need `--like` to say
-    which part you want.
-*   Self-repair covers the list and its fields. Item-page fields (`detail`) are not repaired yet.
-*   Sites that actively block automated browsers are not handled. `--login` is for sites that
-    need an account, not for getting past bot checks.
-*   Infinite scroll is detected when more pages are asked for (`--all-pages`, `--pages N`).
-*   The AI options are tested against a stand-in model only; they have not been run against a
-    live AI service in this repository's tests.
-*   There is no site-wide crawler. It reads one list, its pages and its items.
+*   **Bot protection.** Sites that refuse automated browsers (PyPI search, Stack Overflow) are
+    not handled. `--login` is for sites that need an account, not for getting past bot checks.
+*   **Frames.** Data inside an `<iframe>` is not read. Point it at the frame's own address.
+*   **Generated class names.** They are avoided when recognised, but some slip through
+    (`div.jeApUG` on BBC). Such a recipe stops matching at the site's next release; `run` then
+    repairs it from the last run's data.
+*   **Records that alternate in a class-less table** come out as one column.
+*   **Self-repair** covers the list and its fields. Item-page fields (`detail`) are not repaired yet.
+*   **Lists delivered only as JSON** (an API behind the page) are read from the rendered page,
+    not from the API.
+*   **Infinite scroll** is detected when more pages are asked for (`--all-pages`, `--pages N`).
+*   **Not verified live:** the AI options were tested with a stand-in model, `--login` with a
+    scripted sign-in, and self-repair by damaging a saved recipe. None of the three has been run
+    against a real AI service, a real account or a real redesign in this repository's tests.
+*   **No site-wide crawler.** It reads one list, its pages and its items.
 
 ## 🤖 The AI-assisted builder (older, optional)
 
@@ -173,8 +217,18 @@ scrapewizard https://example.com/orders --login
 ## 🧪 Tests
 
 ```bash
+pip install -r requirements.txt
+playwright install chromium
 python -m pytest tests/ -v --ignore=tests/golden_sites
 ```
+
+182 tests, all offline: every page they read is served from the test's own machine. Some start
+a real browser, which is why the browser install is needed.
+
+## 📚 More
+
+* [learn.md](learn.md): how it works inside, module by module.
+* [SCRAPER_PLAN.md](SCRAPER_PLAN.md): the research behind it, the plan, and what is done and open.
 
 ---
 

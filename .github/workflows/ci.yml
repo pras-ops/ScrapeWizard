@@ -31,9 +31,8 @@ jobs:
 
   fresh-install:
     name: Fresh install (${{ matrix.os }})
-    # Verification-ladder rung 2 (PLATFORM_PLAN.md §14.4): a clean machine must be able
-    # to install from requirements.txt and import/construct the core. Catches missing
-    # dependencies (e.g. the yaspin incident) before users do.
+    # A clean machine must be able to install from requirements.txt and import the
+    # whole command line. Catches a missing dependency before users do.
     strategy:
       fail-fast: false
       matrix:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scrapewizard"
 version = "1.2.0"
-description = "An agentic AI web scraper builder using Playwright and LLMs."
+description = "Point it at a page, get the data. Builds a reusable scraper recipe with no AI key; AI help is optional."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
