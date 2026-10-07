@@ -469,3 +469,24 @@ def test_rows_with_different_classes_are_found_through_their_parent():
     assert result.recipe.container == "#openings > li"
     assert len(result.records) == 8
     assert result.records[3] == {"job": "Job opening number 4", "firm": "Firm 4", "price": "$45,000"}
+
+
+def test_page_with_no_ids_or_classes_at_all_still_gives_its_list():
+    """Old hand-written pages name nothing. The list is reached from the body."""
+    rows = "".join(
+        f'<tr><td><a href="/paper/{n}.html">Report number {n} on the survey</a></td>'
+        f"<td>19{80 + n}</td><td>Author {n}</td></tr>"
+        for n in range(1, 8)
+    )
+    page = f"""<html><body><h1>Reports</h1><p>All the reports we have published.</p>
+               <div><table><tr><th>Report</th><th>Year</th><th>Author</th></tr>{rows}</table></div></body></html>"""
+    result = build_recipe(page, "https://old.test/reports.html")
+    assert result is not None
+    assert result.recipe.container == "body > div > table > tr"
+    assert result.records[0] == {
+        "report": "Report number 1 on the survey",
+        "year": 1981,
+        "author": "Author 1",
+        "report_url": "https://old.test/paper/1.html",
+    }
+    assert len(result.records) == 7

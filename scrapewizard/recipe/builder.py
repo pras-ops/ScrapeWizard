@@ -150,6 +150,8 @@ def _anchor_selector(tag: Tag, index: _PageIndex) -> Optional[str]:
     classes = _stable_classes(tag)
     if classes and index.is_only(tag.name, classes):
         return _simple_selector(tag)
+    if tag.name == "body":
+        return "body"  # a page with no ids or classes at all still has one body
     return None
 
 
