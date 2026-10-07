@@ -1,5 +1,7 @@
 """Getting a page: plain HTTP first, a real browser only when needed."""
 import re
+import time
+from typing import Optional
 
 import httpx
 
@@ -16,6 +18,8 @@ BROWSER_HEADERS = {
 }
 
 
+# New elements a page must gain before "load more" or scrolling counts as having loaded content.
+MIN_GROWTH = 5
 META_CHARSET_RE = re.compile(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([\w-]+)", re.I)
 
 
@@ -66,32 +70,118 @@ def fetch_http(url: str, timeout: float = 20.0) -> str:
     return decode_body(response)
 
 
+class BrowserSession:
+    """One headless browser kept open for a whole run.
+
+    Used when pages need JavaScript, and to follow lists that grow in place
+    (a "load more" button or infinite scroll) instead of moving to a new address.
+    """
+
+    def __init__(self, timeout: float = 30.0):
+        self.timeout = timeout
+        self._playwright = None
+        self._browser = None
+        self.page = None
+
+    def __enter__(self) -> "BrowserSession":
+        try:
+            from playwright.sync_api import Error as PlaywrightError, sync_playwright
+        except ImportError as e:
+            raise FetchError("This page needs a browser. Install it with: pip install playwright") from e
+        self._error = PlaywrightError
+        try:
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(headless=True)
+            self.page = self._browser.new_page(user_agent=BROWSER_HEADERS["User-Agent"])
+        except PlaywrightError as e:
+            self.__exit__(None, None, None)
+            raise self._as_fetch_error(e) from e
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for closer in (getattr(self._browser, "close", None), getattr(self._playwright, "stop", None)):
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass  # the browser may already be gone; there is nothing left to release
+        self._browser = self._playwright = self.page = None
+
+    @staticmethod
+    def _as_fetch_error(error: Exception) -> FetchError:
+        message = str(error)
+        if "Executable doesn't exist" in message or "playwright install" in message:
+            return FetchError("The browser is not installed. Run: playwright install chromium")
+        return FetchError(f"The browser could not load the page ({message.splitlines()[0][:120]}).")
+
+    def _settle(self) -> None:
+        try:
+            # Let late requests finish, but do not fail on pages that never go quiet.
+            self.page.wait_for_load_state("networkidle", timeout=10000)
+        except self._error:
+            log("Page did not reach network idle", level="debug")
+
+    def open(self, url: str) -> str:
+        """Go to a page and return its HTML after scripts have run."""
+        try:
+            self.page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+        except self._error as e:
+            raise self._as_fetch_error(e) from e
+        self._settle()
+        return self.page.content()
+
+    def _element_count(self) -> int:
+        return self.page.evaluate("document.getElementsByTagName('*').length")
+
+    def _wait_for_growth(self, before: int, timeout: float = 8.0, quiet: float = 0.6) -> bool:
+        """Wait until the page has gained real content and then stopped changing.
+
+        A spinner appearing is not content, so a handful of new elements does
+        not count. "Network idle" cannot be used here: Playwright reaches that
+        state once per page load and reports it as reached ever after.
+        """
+        deadline = time.monotonic() + timeout
+        last = before
+        last_change = time.monotonic()
+        while time.monotonic() < deadline:
+            self.page.wait_for_timeout(150)
+            now = self._element_count()
+            if now != last:
+                last, last_change = now, time.monotonic()
+            elif now >= before + MIN_GROWTH and time.monotonic() - last_change >= quiet:
+                return True
+        return last >= before + MIN_GROWTH
+
+    def click_more(self, selector: str) -> Optional[str]:
+        """Click a "load more" control. Returns the grown page, or None if nothing more loaded."""
+        try:
+            button = self.page.locator(selector).first
+            if button.count() == 0 or not button.is_visible() or not button.is_enabled():
+                return None
+            before = self._element_count()
+            button.click(timeout=5000)
+            if not self._wait_for_growth(before):
+                return None
+            return self.page.content()
+        except self._error:
+            return None
+
+    def scroll_more(self) -> Optional[str]:
+        """Scroll to the bottom. Returns the grown page, or None if the page did not grow."""
+        try:
+            before = self._element_count()
+            self.page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            if not self._wait_for_growth(before):
+                return None
+            return self.page.content()
+        except self._error:
+            return None
+
+
 def fetch_browser(url: str, timeout: float = 30.0) -> str:
     """Load a page in headless Chromium and return the HTML after scripts have run."""
-    try:
-        from playwright.sync_api import Error as PlaywrightError, sync_playwright
-    except ImportError as e:
-        raise FetchError("This page needs a browser. Install it with: pip install playwright") from e
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                page = browser.new_page(user_agent=BROWSER_HEADERS["User-Agent"])
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-                try:
-                    # Let late requests finish, but don't fail on pages that never go quiet.
-                    page.wait_for_load_state("networkidle", timeout=10000)
-                except PlaywrightError:
-                    log(f"Page did not reach network idle: {url}", level="debug")
-                return page.content()
-            finally:
-                browser.close()
-    except PlaywrightError as e:
-        message = str(e)
-        if "Executable doesn't exist" in message or "playwright install" in message:
-            raise FetchError("The browser is not installed. Run: playwright install chromium") from e
-        raise FetchError(f"The browser could not load the page ({message.splitlines()[0][:120]}).") from e
+    with BrowserSession(timeout) as session:
+        return session.open(url)
 
 
 def fetch(url: str, mode: str = "http") -> str:

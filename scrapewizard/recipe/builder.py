@@ -48,6 +48,11 @@ class BuildResult:
     records: List[Dict[str, Any]]      # what the recipe yields on the sample page
     next_url: Optional[str] = None     # set when the page links to a next page
 
+    @property
+    def has_more(self) -> bool:
+        """True if the list continues: on another page, or by loading more in place."""
+        return self.next_url is not None or self.recipe.pagination.get("type") in ("load_more", "scroll")
+
 
 @dataclass
 class _FieldDraft:
@@ -554,6 +559,14 @@ def _to_recipe(candidate: _Candidate, soup: BeautifulSoup, url: str, name: Optio
         pagination: Dict[str, Any] = {"type": "next_link", "select": detected["selector"], "max_pages": 1}
     elif next_url:
         pagination = {"type": "auto", "max_pages": 1}
+    elif detected["type"] == "load_more":
+        # Clicked in a browser, so a text-based selector is fine when the button has no id or class.
+        text = detected.get("text", "").replace('"', "")
+        pagination = {
+            "type": "load_more",
+            "select": detected.get("selector") or f'{detected.get("tag", "button")}:has-text("{text}")',
+            "max_pages": 1,
+        }
     else:
         pagination = {"type": "none"}
     recipe = Recipe(

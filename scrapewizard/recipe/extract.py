@@ -7,8 +7,8 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from scrapewizard.recipe.fetch import fetch
-from scrapewizard.recipe.model import Recipe, RecipeError
+from scrapewizard.recipe.fetch import BrowserSession, fetch
+from scrapewizard.recipe.model import IN_PLACE_PAGINATION, Recipe, RecipeError
 from scrapewizard.recipe.types import clean_text, convert
 from scrapewizard.recon.pagination import find_next_url
 
@@ -121,29 +121,52 @@ def evaluate_checks(records: List[Dict[str, Any]], recipe: Recipe) -> List[str]:
 def run_recipe(
     recipe: Recipe,
     max_pages: Optional[int] = None,
-    fetcher: Callable[[str, str], str] = fetch,
+    fetcher: Optional[Callable[[str, str], str]] = None,
     delay: float = 0.3,
     on_page: Optional[Callable[[int, int], None]] = None,
+    session_factory: Callable[[], Any] = BrowserSession,
 ) -> RunResult:
     """Run a recipe and return its records with any failed checks.
 
+    Recipes that need a browser (``fetch: browser``, or a list that grows in
+    place) keep one browser open for the whole run.
+
     Args:
         max_pages: Pages to read. Defaults to the recipe's ``pagination.max_pages`` (1 if unset).
-        fetcher: ``(url, mode) -> html``. Replaceable for tests.
+        fetcher: ``(url, mode) -> html``. When given it is used for every page
+            and no browser is opened; meant for tests.
         delay: Seconds to wait between pages, to be polite to the site.
         on_page: Called with (pages read, records so far) after each page.
+        session_factory: Creates the browser session. Replaceable for tests.
     """
     limit = max_pages if max_pages is not None else int(recipe.pagination.get("max_pages") or 1)
+    in_place = recipe.pagination.get("type") in IN_PLACE_PAGINATION
+    if fetcher is None and (recipe.fetch == "browser" or in_place):
+        with session_factory() as session:
+            return _read_pages(recipe, limit, session.open, session, delay, on_page)
+    fetch_page = fetcher or fetch
+    return _read_pages(recipe, limit, lambda url: fetch_page(url, recipe.fetch), None, delay, on_page)
+
+
+def _read_pages(
+    recipe: Recipe,
+    limit: int,
+    open_url: Callable[[str], str],
+    session: Optional[Any],
+    delay: float,
+    on_page: Optional[Callable[[int, int], None]],
+) -> RunResult:
     records: List[Dict[str, Any]] = []
     seen_records = set()
-    visited = set()
-    url: Optional[str] = recipe.url
+    kind = recipe.pagination.get("type", "none")
+    url = recipe.url
+    visited = {url}
+    html = open_url(url)
     pages = 0
     stale_pages = 0  # consecutive pages that added nothing new
 
-    while url and pages < limit and url not in visited:
-        visited.add(url)
-        soup = parse(fetcher(url, recipe.fetch))
+    while True:
+        soup = parse(html)
         page_records = extract_records(soup, recipe, url)
         before = len(records)
         for record in page_records:
@@ -158,8 +181,22 @@ def run_recipe(
         stale_pages = stale_pages + 1 if len(records) == before else 0
         if not page_records or stale_pages >= 2 or pages >= limit:
             break
-        url = next_page_url(soup, recipe, url)
-        if url:
-            time.sleep(delay)
+
+        if kind in IN_PLACE_PAGINATION and session is not None:
+            # The page itself grows: every read returns all items so far, and duplicates are skipped.
+            grown = session.click_more(recipe.pagination.get("select") or "") if kind == "load_more" \
+                else session.scroll_more()
+            if grown is None:
+                break
+            html = grown
+            continue
+
+        next_url = next_page_url(soup, recipe, url)
+        if not next_url or next_url in visited:
+            break
+        time.sleep(delay)
+        url = next_url
+        visited.add(url)
+        html = open_url(url)
 
     return RunResult(records=records, pages=pages, failures=evaluate_checks(records, recipe))

@@ -177,6 +177,8 @@ class PaginationDetector:
                 "detected": True,
                 "type": "load_more",
                 "selector": css_for(load_more, self.soup),
+                "tag": load_more.name,
+                "text": " ".join(load_more.get_text(" ", strip=True).split()),
             }
 
         if "page=" in self.url or "/p/" in self.url:

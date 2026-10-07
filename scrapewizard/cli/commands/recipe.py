@@ -10,7 +10,8 @@ from rich.table import Table
 
 from scrapewizard.recipe.builder import BuildResult, build_recipe
 from scrapewizard.recipe.extract import RunResult, run_recipe
-from scrapewizard.recipe.fetch import FetchError, fetch, fetch_browser, fetch_http
+from scrapewizard.recipe.extract import parse
+from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch, fetch_http
 from scrapewizard.recipe.heal import RepairRefused, repair, what_broke
 from scrapewizard.recipe.model import Recipe, RecipeError, load_recipe, save_recipe
 from scrapewizard.recipe.output import FORMATS, OutputError, save_records
@@ -99,7 +100,10 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool)
             console.print("The plain page didn't show a list. Loading it in a browser ...")
 
     try:
-        result = build_recipe(fetch_browser(url), url, likes=likes, name=name, fetch_mode="browser")
+        with BrowserSession() as session:
+            result = build_recipe(session.open(url), url, likes=likes, name=name, fetch_mode="browser")
+            if result and not result.has_more:
+                _detect_scrolling(session, result)
     except FetchError as e:
         # If plain HTTP was refused too, that message says more about the cause.
         raise _fail(str(http_error or e))
@@ -112,6 +116,41 @@ def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool)
                     "Check the values are visible on the page, exactly as typed.")
     raise _fail("Couldn't find a repeating list on this page.",
                 'Try:  scrapewizard <url> --like "a value you can see on the page"')
+
+
+def _detect_scrolling(session: BrowserSession, result: BuildResult) -> None:
+    """Scroll once: if more items appear, the list is an infinite scroll."""
+    grown = session.scroll_more()
+    if grown is None:
+        return
+    try:
+        now = len(parse(grown).select(result.recipe.container))
+    except Exception:
+        return
+    if now > len(result.records):
+        result.recipe.pagination = {"type": "scroll", "max_pages": 1}
+
+
+def _look_for_more_in_browser(url: str, likes: List[str], result: BuildResult) -> BuildResult:
+    """More pages were asked for but the plain page shows no way to continue.
+
+    Some lists only reveal their "next" control, or load more on scrolling,
+    once scripts have run. Look again in a browser before settling for one page.
+    """
+    console.print("The plain page shows no next page. Checking in a browser whether it loads more ...")
+    try:
+        with BrowserSession() as session:
+            rendered = build_recipe(session.open(url), url, likes=likes, name=result.recipe.name,
+                                    fetch_mode="browser")
+            if rendered and not rendered.has_more:
+                _detect_scrolling(session, rendered)
+    except FetchError as e:
+        console.print(f"{e} Keeping the one page already read.")
+        return result
+    if rendered and rendered.has_more:
+        return rendered
+    console.print("It doesn't: this is the whole list.")
+    return result
 
 
 def _save(records: List[Dict[str, Any]], recipe: Optional[Recipe], name: str, fmt: str) -> Optional[Path]:
@@ -168,9 +207,10 @@ def get(
     console.print()
     _show_preview(result.records)
     console.print()
-    has_more = result.next_url is not None
+    has_more = result.has_more
+    in_place = recipe.pagination.get("type") in ("load_more", "scroll")
     if has_more:
-        console.print("This list continues on more pages.")
+        console.print("This list loads more as you go." if in_place else "This list continues on more pages.")
 
     if all_pages:
         wanted = ALL_PAGES
@@ -184,8 +224,17 @@ def get(
             console.print("Nothing saved.")
             raise typer.Exit(code=0)
 
+    if wanted > 1 and not has_more and recipe.fetch == "http":
+        result = _look_for_more_in_browser(url, list(like or []), result)
+        recipe = result.recipe
+        has_more = result.has_more
+        in_place = recipe.pagination.get("type") in ("load_more", "scroll")
+
     records = result.records
     if wanted > 1 and has_more:
+        if in_place and recipe.fetch != "browser":
+            console.print("Following it needs a browser. Starting one ...")
+            recipe.fetch = "browser"
         try:
             records = _run_pages(recipe, wanted).records
         except FetchError as e:

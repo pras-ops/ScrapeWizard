@@ -8,7 +8,9 @@ import yaml
 from scrapewizard.recipe.types import FIELD_TYPES
 
 FETCH_MODES = ("http", "browser")
-PAGINATION_TYPES = ("none", "next_link", "auto")
+# next_link / auto move to a new address; load_more and scroll grow the page in a browser.
+PAGINATION_TYPES = ("none", "next_link", "auto", "load_more", "scroll")
+IN_PLACE_PAGINATION = ("load_more", "scroll")
 
 
 class RecipeError(ValueError):
