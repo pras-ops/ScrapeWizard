@@ -27,15 +27,39 @@ class Changes:
         return f"{self.new} new, {self.changed} changed, {self.removed} removed since last run"
 
 
-def state_path(recipe_path: Union[str, Path]) -> Path:
-    """shop.recipe.yaml -> .scrapewizard/shop.state.json in the same folder."""
+def _beside(recipe_path: Union[str, Path], suffix: str) -> Path:
     recipe_path = Path(recipe_path)
     name = recipe_path.name
     for ending in (".recipe.yaml", ".recipe.yml", ".yaml", ".yml"):
         if name.endswith(ending):
             name = name[: -len(ending)]
             break
-    return recipe_path.parent / STATE_DIR / f"{name}.state.json"
+    return recipe_path.parent / STATE_DIR / f"{name}{suffix}"
+
+
+def state_path(recipe_path: Union[str, Path]) -> Path:
+    """shop.recipe.yaml -> .scrapewizard/shop.state.json in the same folder."""
+    return _beside(recipe_path, ".state.json")
+
+
+def session_path(recipe_path: Union[str, Path]) -> Path:
+    """shop.recipe.yaml -> .scrapewizard/shop.session.json: the saved sign-in."""
+    return _beside(recipe_path, ".session.json")
+
+
+def _prepare_dir(path: Path) -> None:
+    """Create the folder, with a .gitignore so run memory and sign-ins are never committed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ignore = path.parent / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("# Run memory and saved sign-ins. Not for sharing.\n*\n", encoding="utf-8")
+
+
+def save_session(recipe_path: Union[str, Path], storage_state: Dict[str, Any]) -> Path:
+    path = session_path(recipe_path)
+    _prepare_dir(path)
+    path.write_text(json.dumps(storage_state), encoding="utf-8")
+    return path
 
 
 def key_field(recipe: Recipe, records: List[Dict[str, Any]]) -> Optional[str]:
@@ -79,7 +103,7 @@ def make_state(recipe: Recipe, records: List[Dict[str, Any]], pages: int) -> Dic
 
 def save_state(recipe_path: Union[str, Path], recipe: Recipe, records: List[Dict[str, Any]], pages: int) -> Path:
     path = state_path(recipe_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_dir(path)
     path.write_text(json.dumps(make_state(recipe, records, pages), ensure_ascii=False, default=str),
                     encoding="utf-8")
     return path

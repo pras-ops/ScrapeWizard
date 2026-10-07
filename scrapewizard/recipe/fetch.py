@@ -1,7 +1,8 @@
 """Getting a page: plain HTTP first, a real browser only when needed."""
 import re
 import time
-from typing import Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import httpx
 
@@ -93,10 +94,19 @@ class BrowserSession:
     (a "load more" button or infinite scroll) instead of moving to a new address.
     """
 
-    def __init__(self, timeout: float = 30.0):
+    def __init__(self, timeout: float = 30.0, storage_state: Any = None, headless: bool = True):
+        """
+        Args:
+            storage_state: A saved sign-in (cookies and local storage), as a
+                file path or the dict Playwright produces. None for a clean browser.
+            headless: False shows the window, for signing in by hand.
+        """
         self.timeout = timeout
+        self.storage_state = storage_state
+        self.headless = headless
         self._playwright = None
         self._browser = None
+        self.context = None
         self.page = None
 
     def __enter__(self) -> "BrowserSession":
@@ -107,8 +117,12 @@ class BrowserSession:
         self._error = PlaywrightError
         try:
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=True)
-            self.page = self._browser.new_page(user_agent=BROWSER_HEADERS["User-Agent"])
+            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            self.context = self._browser.new_context(
+                user_agent=BROWSER_HEADERS["User-Agent"],
+                storage_state=str(self.storage_state) if isinstance(self.storage_state, Path) else self.storage_state,
+            )
+            self.page = self.context.new_page()
         except PlaywrightError as e:
             self.__exit__(None, None, None)
             raise self._as_fetch_error(e) from e
@@ -121,7 +135,7 @@ class BrowserSession:
                     closer()
                 except Exception:
                     pass  # the browser may already be gone; there is nothing left to release
-        self._browser = self._playwright = self.page = None
+        self._browser = self._playwright = self.context = self.page = None
 
     @staticmethod
     def _as_fetch_error(error: Exception) -> FetchError:
@@ -192,6 +206,28 @@ class BrowserSession:
             return self.page.content()
         except self._error:
             return None
+
+
+def sign_in(url: str, wait: Callable[[Any], None], headless: bool = False,
+            timeout: float = 30.0) -> Tuple[Dict[str, Any], str, str]:
+    """Open a page for the user to sign in, and capture the session when they are done.
+
+    Args:
+        wait: Called with the browser page; returns when the user has signed
+            in and is on the page they want. By default this waits for Enter.
+        headless: Only tests hide the window.
+
+    Returns:
+        (the saved sign-in, the address the user ended on, that page's HTML)
+    """
+    with BrowserSession(timeout, headless=headless) as session:
+        session.open(url)
+        wait(session.page)
+        try:
+            session.page.wait_for_load_state("domcontentloaded", timeout=timeout * 1000)
+            return session.context.storage_state(), session.page.url, session.page.content()
+        except session._error as e:
+            raise FetchError("The browser window was closed before the sign-in could be saved.") from e
 
 
 def fetch_browser(url: str, timeout: float = 30.0) -> str:

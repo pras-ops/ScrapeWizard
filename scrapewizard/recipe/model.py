@@ -46,6 +46,9 @@ class Recipe:
     # page and may also be ``jsonld:path.to.key`` or ``meta:name``.
     follow: Optional[str] = None
     detail_fields: List[Field] = field(default_factory=list)
+    # True if the pages are only visible when signed in. The saved sign-in lives
+    # beside the recipe in .scrapewizard/, never in the recipe itself.
+    login: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
@@ -59,6 +62,8 @@ class Recipe:
             "pagination": dict(self.pagination),
             "checks": dict(self.checks),
         }
+        if self.login:
+            data["login"] = True
         if self.follow and self.detail_fields:
             data["detail"] = {
                 "follow": self.follow,
@@ -142,6 +147,7 @@ def recipe_from_dict(data: Any) -> Recipe:
         history=[{str(k): str(v) for k, v in entry.items()} for entry in history],
         follow=follow,
         detail_fields=detail_fields,
+        login=bool(data.get("login", False)),
     )
 
 
