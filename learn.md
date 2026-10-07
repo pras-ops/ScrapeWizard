@@ -14,12 +14,6 @@ This document breaks down the architecture, the logic, and the exact prompts use
 
 The project follows a **Modular State Machine** architecture. Each step of the process is isolated into a "Phase".
 
-### ❄️ MVP1 Freeze + Bridge Injection
-As we pivot from the CLI (MVP1) to the Desktop Studio (MVP2), we follow a **risk-minimized** philosophy:
-- **MVP1 Freeze**: The core CLI agents (`Analyst`, `CodeGen`, `Repair`) are frozen to maintain stability for existing users.
-- **Bridge Injection**: New bridge commands (`studio`, `record`, `test`) are "injected" into the CLI as isolated modules.
-- **Studio Isolation**: All MVP2-specific logic resides in the `studio/` directory, importing MVP1 as a library rather than refactoring it.
-
 ### The "Phase" Workflow (State Machine)
 1.  **INIT (Stealth Probe Pre-Scan)**: Headed browser probe (3-5s) to detect bot defenses and sign-in requirements, then recommend access mode.
 2.  **GUIDED_ACCESS**: If hostile or auth-heavy, user manually navigates (Login, Filter, Search) in a headed browser.
@@ -135,24 +129,20 @@ If you choose **Guided Access**, you can search, filter, and login manually. Scr
 
 ---
 
-## 🌉 5. The Bridge & Studio (MVP2)
+## 🧩 5. The Element Engine
 
-To enable the transition to a visual IDE, we've implemented an architectural bridge.
+`scrapewizard/engine/` holds the pieces that make element lookups survive page changes. They are
+tested on their own and are not yet wired into generated scrapers.
 
-### 1. Studio Backend (`studio/backend/main.py`)
-A FastAPI server that acts as the orchestrator for the Desktop UI. 
-- **CDP Bridge**: Proxies Chrome DevTools Protocol (CDP) events to the React frontend.
-- **Session Management**: Tracks user recordings and state via `StudioState`.
-- **Validation**: Uses Pydantic models in `studio/shared/validators.py` for strictly typed API requests.
-
-### 2. Bridge Engine (`studio/bridge/engine.js`)
-An injected script that transforms a standard browser page into an interactive picker.
-- **Picker Mode**: Intercepts clicks and hovers to generate CSS selectors.
-- **Box Model Overlay**: Draws real-time highlights over the target site to assist item selection.
-- **Event Binding**: Communicates directly with the backend via `onElementSelected`.
-
-### 3. AET (Abstract Extraction Template)
-The visual alternative to the SRC. Instead of the AI guessing selectors from a DOM snapshot, the **AET compiler** builds extraction logic directly from the human-selected patterns in the Studio IDE.
+- **Selector ladder (`selector_engine.py`)**: ranked selectors for an element, skipping
+  machine-generated class names.
+- **Fingerprints (`fingerprint.py`)**: tag, attributes, text, parent/sibling context and position,
+  captured for an element so it can be found again later.
+- **Self-healing (`healing.py`)**: when a selector stops matching, candidates are scored against the
+  fingerprint. A match is accepted only above a confidence threshold and only if it clearly beats
+  the runner-up.
+- **Picker (`picker.js`)**: an injected script that turns a page into a point-and-click selector with
+  a highlight overlay.
 
 ---
 

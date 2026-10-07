@@ -1,1 +1,1 @@
-# ScrapeWizard core testing engine.
+# ScrapeWizard element engine: selector ladders, fingerprints and self-healing.
