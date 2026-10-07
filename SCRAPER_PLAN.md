@@ -220,8 +220,91 @@ data-verified healing. Phase 5 turns it into something you can leave running.
 
 ---
 
+## 9. What to borrow, project by project
+
+A second research pass looked at *how* specific projects solve problems ScrapeWizard has. Each
+row is a technique to adopt, not a tool to copy.
+
+### Tier 1 — High value, small effort
+
+| # | Technique | Borrowed from | ScrapeWizard today | What to do |
+|---|---|---|---|---|
+| 1 | **Structured data first** | recipe-scrapers ("wild mode": Schema.org → OpenGraph → site rules), extruct | Ignores JSON-LD, microdata and embedded page data | Before any selector work, read JSON-LD / microdata / OpenGraph / `__NEXT_DATA__`. Product, article, recipe and job pages often need **zero selectors** |
+| 2 | **Learn from examples** | AutoScraper (`build(url, wanted_list)`, ~8k stars for this one idea), Scrapling `find_similar` | Needs an LLM to decide what to extract | `scrapewizard build URL --like "A Light in the Attic" --like "£51.77"`: find the nodes holding those values, generalise to their siblings, write the recipe. No AI, no clicking |
+| 3 | **Typed values** | price-parser (`"22,90 €"` → amount + currency), dateparser, Crawl4AI's built-in patterns (email, URL, currency, date, phone…) | Every field is named `text_field`, `link` or `image` and exported as raw text | Detect type from the value, name the field after it (`price`, `date`, `email`), and normalise on export |
+| 4 | **Run monitors** | Spidermon (item-count minimum, per-field coverage, finish reason, JSON-schema item validation), Scrapy contracts | A one-off "is 80% of data missing?" check during build | Recipe `checks`: minimum records, required fields, per-field coverage thresholds. Evaluated on every run |
+| 5 | **Schema validated against the sample** | Crawl4AI `generate_schema(validate=True)`, plus its advice to use 3+ sample pages and avoid `nth-child` | Generated Python is "validated" by running it and hoping | Whatever produces a recipe (heuristics or AI) must be run against the saved page before it's accepted |
+| 6 | **Polite by default** | Scrapling / Scrapy AutoThrottle (double the delay when blocked, honour `Retry-After`), robots.txt option | Fixed waits, no backoff | Small throttle in the runtime; respects `Retry-After` |
+
+### Tier 2 — High value, moderate effort
+
+| # | Technique | Borrowed from | ScrapeWizard today | What to do |
+|---|---|---|---|---|
+| 7 | **Capture the site's own API** | Scrapling `capture_xhr`, mitmproxy2swagger (traffic → API description with inferred path parameters) | `Scanner` logs API URLs and JSON response sizes, then discards them | Keep the JSON bodies. If a response holds an array whose items match the records on the page, offer an **API recipe**: call the endpoint directly and infer the page parameter |
+| 8 | **Real pagination detection** | autopager (classifies links as PREV / PAGE / NEXT from link text, class names, URL parts and neighbours) | Matches only the literal text "next", ">" or "»"; no numbered pages, load-more or infinite scroll | Score links on the same features plus `rel="next"` and `aria-label`; detect load-more buttons and scroll-triggered loading |
+| 9 | **List → detail pages** | webscraper.io sitemaps (Link selector follows into a child page; Table selector maps headers to columns) | One page type per scraper | `follow:` in the recipe to open each item's link and merge detail fields; a `table` field type |
+| 10 | **Shrink the page before any AI call** | dompruner, the Co-Scraper paper, HN advice | Sends the analysis snapshot and more to the model | Strip scripts, styles, hidden nodes, nav and footer; send one sample item, not the page. Reported savings: 50–70% from stripping, a further 30–50% from Markdown |
+| 11 | **Change alerts** | changedetection.io (diff between runs, trigger/ignore rules, Apprise for 90+ notification targets) | No run-to-run comparison, no alerts | Diff records against the last run (new / changed / removed); optional `notify` extra using Apprise |
+| 12 | **Resume long runs** | Scrapling / Scrapy pause-and-resume checkpoints | A failed paginated run starts over | Save the page cursor and records so far |
+
+### Tier 3 — Nice to have, or experiments
+
+| # | Technique | Borrowed from | Note |
+|---|---|---|---|
+| 13 | **Pipe-friendly one-liners** | shot-scraper (`shot-scraper javascript URL "…"` prints JSON; YAML for batches) | `scrapewizard get URL` printing JSON to stdout makes it scriptable |
+| 14 | **Fetchers as optional extras** | Scrapling (`[fetchers]`: HTTP with browser impersonation, stealth, full browser) | Base install stays tiny; `[browser]`, `[stealth]` add weight only when needed |
+| 15 | **Recipe library** | recipe-scrapers (hundreds of site rules), Scrapling's `ShopifySpider` | A `recipes/` folder for common platforms (Shopify `/products.json`, WordPress REST, sitemaps). Community-contributable |
+| 16 | **Markdown output** | Crawl4AI, Firecrawl, Scrapling `page.markdown()` | Cheap `--format md` for people feeding LLMs |
+| 17 | **MCP server** | Scrapling `[ai]` | Lets AI assistants call ScrapeWizard as a tool. Later |
+| 18 | **Lighter browser** | Lightpanda (no rendering; claims up to 9× faster and 16× less memory than Chrome; speaks CDP so Playwright can connect) | Experiment only: site compatibility is still incomplete |
+
+### Defects found while comparing (confirmed by running)
+
+- **CSV export crashes on uneven records.** `scrapewizard_runtime/io.py` takes column names from
+  the first record. Writing `[{"title": "A"}, {"title": "B", "price": "9"}]` raises
+  `ValueError: dict contains fields not in fieldnames: 'price'`.
+- **Pagination detection is unreliable** (`recon/pagination.py`):
+  - a plain `<a>Next</a>` yields `a:contains('Next')`, which is not a valid selector
+  - a link with class `md:flex next-link` yields `.md:flex.next-link`, also invalid (unescaped colon)
+  - numbered page links, `rel="next"` links with an icon, and "Load more" buttons are all
+    reported as "no pagination"
+
+### Not worth borrowing
+
+- Scrapling's and Crawlee's spider frameworks, proxy rotation and session pools: that's crawl
+  infrastructure. Export to them instead.
+- "Bypasses all Cloudflare" style claims: an arms race that would dominate maintenance.
+- Per-page LLM extraction (ScrapeGraphAI style): the cost model users complain about most.
+
+### How this changes the phases
+
+- **Phase 1 (recipe):** adopt Crawl4AI-style typed fields (text, attribute, regex, nested, list,
+  table) and validate against the saved sample (#5). Fix the CSV defect.
+- **Phase 2 (build without AI):** add learn-from-examples (#2) and typed naming (#3). These two
+  remove most of the reason an LLM was needed.
+- **Phase 3 (fetch ladder):** structured data first (#1) and API capture (#7).
+- **Phase 4–5 (healing, quality):** monitors (#4), change alerts (#11), resume (#12).
+- **Runtime:** throttle (#6), better pagination (#8), list → detail (#9).
+
+---
+
 ## Sources
 
+- AutoScraper: https://github.com/alirezamika/autoscraper
+- Crawl4AI LLM-free extraction (schema format, `generate_schema`, regex patterns): https://docs.crawl4ai.com/extraction/no-llm-strategies/
+- Scrapling documentation (fetchers, `capture_xhr`, AutoThrottle, checkpoints, MCP): https://scrapling.readthedocs.io/en/latest/index.html
+- Spidermon (monitors, field coverage, validation): https://www.zyte.com/blog/giving-spidey-senses-to-your-web-scraping-spiders-using-spidermon/ · https://scrapeops.io/python-scrapy-playbook/extensions/scrapy-spidermon-guide/
+- changedetection.io: https://mintlify.com/dgtlmoon/changedetection.io/introduction
+- mitmproxy2swagger: https://github.com/alufers/mitmproxy2swagger
+- autopager: https://pypi.org/project/autopager/0.1
+- recipe-scrapers architecture: https://cdn.jsdelivr.net/npm/recipe-scrapers@1.10.0/docs/architecture.md · https://pypi.org/project/recipe-scrapers/13.31.0
+- price-parser: https://pypi.org/project/price-parser
+- Zyte open-source libraries overview: https://www.zyte.com/blog/deep-dive-into-zytes-open-source-libraries
+- DOM pruning before LLM (Co-Scraper paper, dompruner): https://arxiv.org/pdf/2606.14821 · https://pypi.org/project/dompruner/
+- Token reduction for scraping agents: https://www.mindstudio.ai/blog/optimize-web-scraping-skills-ai-agents-token-reduction
+- shot-scraper: https://simonwillison.net/2022/Mar/14/scraping-web-pages-shot-scraper
+- Lightpanda: https://linuxiac.com/lightpanda-promises-a-faster-lightweight-alternative-to-headless-chrome/
+- webscraper.io sitemaps and selector types: https://webscraper.io/blog/scrape-yellowpages.com
 - Scrapling adaptive selectors, tested: https://thunderbit.com/blog/scrapling-review
 - Scrapling guide: https://betterstack.com/community/guides/scaling-python/scrapling-adaptive/
 - Scrapling docs: https://scrapling.readthedocs.io/en/latest/index.html
