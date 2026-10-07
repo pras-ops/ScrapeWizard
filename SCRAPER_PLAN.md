@@ -5,6 +5,17 @@
 > could not be read directly; Hacker News and practitioner write-ups stand in for it.
 > Every claim about ScrapeWizard's own code was checked against this branch.
 
+## How this plan is organised
+
+| Part | Sections | Answers |
+|---|---|---|
+| **Background** | §1–§5 | Where the tool stands, what else exists, and the niche to own |
+| **Part A — User flow** | §6 | How a person uses it: commands, the one question, what they see |
+| **Part B — How the code works** | §7–§10 | Design rules, phased build plan, and techniques to borrow |
+
+Part A comes first on purpose. The user flow is the target, and the code changes in Part B are
+chosen because they make that flow possible.
+
 ---
 
 ## 1. Where ScrapeWizard stands today (measured)
@@ -113,7 +124,180 @@ anywhere else, and it's the angle to lead with.
 
 ---
 
-## 6. Design rules for "lightweight and simple"
+## 6. Part A — User flow: how people use it
+
+The engine can be excellent and the tool still feel chaotic. This part defines what the user
+sees and does. Part B (§7–§10) exists to make this flow possible.
+
+### 6.1 What using it is like today
+
+| Friction | Today |
+|---|---|
+| Before first use | Must run `setup` or `login` and have an AI key |
+| Commands | 8: `build`, `setup`, `login`, `list`, `resume`, `clean`, `doctor`, `version` |
+| Modes | 5 that overlap: default, `--expert`, `--interactive`, `--guided-tour`, `--ci` |
+| Questions | Up to 17 different prompts: access mode, browser mode, credentials, save credentials, field mode, field list, pagination, format, "ready?", "continue anyway?", "how does the data look?", which columns are wrong, "proceed?", and two failure menus |
+| Surprises | A browser window opens on every build; progress bars that wait on a timer |
+| Where results go | `~/scrapewizard_projects/<PROJECT_ID>/output/`, away from where you ran it, under an ID you didn't choose |
+| Running again | Find the project folder and run the generated Python file |
+
+### 6.2 Rules for the new flow
+
+1. **One command to a result.** `scrapewizard <url>`, with nothing to set up first.
+2. **Show first, ask last.** Do the work, show a preview of the data, then ask one question.
+3. **Every question has a flag.** Anything the tool can ask can be answered up front, and
+   `--yes` means never ask. Scripts and people use the same command.
+4. **Files land where you are.** Data and recipe are saved in the current folder with readable
+   names. No hidden project folders, no IDs.
+5. **One way of working.** No modes. `-v` shows more detail; that's the only dial.
+6. **Say why.** If a browser window opens or something fails, one plain sentence explains it
+   and gives the next step.
+7. **AI stays out of the way.** It's never required and never asked about unless you pass `--ai`.
+
+### 6.3 The commands
+
+| Command | What it's for |
+|---|---|
+| `scrapewizard <url>` | Look at a page, preview the data, save it with a recipe |
+| `scrapewizard run <recipe>` | Run a saved recipe again. This is what you schedule |
+| `scrapewizard edit <recipe>` | Fix what was picked: add, remove or rename fields by clicking on the page |
+| `scrapewizard doctor` | Check the installation |
+
+Four commands instead of eight. `setup` and `login` shrink to a one-time key prompt the first
+time `--ai` is used. `list`, `resume` and `clean` go away because there are no hidden projects
+to manage. `build` stays as an alias for a while so existing users aren't broken.
+
+Common flags, the same on `<url>` and `run`:
+
+| Flag | Meaning |
+|---|---|
+| `--format csv\|json\|xlsx` | Output type (default: csv) |
+| `--pages N` / `--all-pages` | How far to follow pagination (default: first page) |
+| `--like "value"` | Teach by example; repeatable |
+| `--out NAME` | File name to save as |
+| `--yes` | Don't ask anything; accept the defaults |
+| `--ai` | Let an AI model help with a messy page |
+| `-v` | Show what it's doing in detail |
+
+### 6.4 The main flow: first use
+
+```
+$ scrapewizard https://books.toscrape.com
+
+Looking at books.toscrape.com ...
+Found 20 items. No browser needed.
+
+  title                   price    in_stock   url
+  A Light in the Attic    £51.77   yes        /catalogue/a-light-in-the-attic_1000
+  Tipping the Velvet      £53.74   yes        /catalogue/tipping-the-velvet_999
+  Soumission              £50.10   yes        /catalogue/soumission_998
+  ... 17 more
+
+This list continues for 50 pages.
+
+Save?  [Enter] this page   [a] all pages   [e] edit fields   [q] quit
+> 
+
+Saved  books.csv           20 rows, 4 columns
+       books.recipe.yaml   run again with: scrapewizard run books.recipe.yaml
+```
+
+One command, one question, two files in the current folder. The same thing with no question at
+all: `scrapewizard https://books.toscrape.com --all-pages --yes`.
+
+### 6.5 The other situations
+
+**Running it again (or on a schedule)**
+
+```
+$ scrapewizard run books.recipe.yaml
+
+books   1,000 rows   12 new, 3 changed, 0 removed since last run
+        all checks passed
+Saved  books.csv
+```
+
+The command exits with an error code when a check fails, so cron, Task Scheduler or CI can
+alert without extra tooling.
+
+**It picked the wrong thing**
+
+Either teach by example:
+`scrapewizard <url> --like "A Light in the Attic" --like "£51.77"`
+or press `e` at the preview (or run `scrapewizard edit books.recipe.yaml`) to click fields on
+the page.
+
+**The site needs a login or blocks automation**
+
+```
+This site needs you to sign in.
+A browser window will open. Sign in as usual, then come back here and press Enter.
+```
+
+The session is saved beside the recipe and reused on later runs. The tool warns that this file
+contains your login and should not be shared or committed.
+
+**The site changed**
+
+```
+$ scrapewizard run books.recipe.yaml
+
+"price" stopped matching (0 of 20 rows).
+Repaired: p.price_color -> p.product-price
+Checked:  20 rows, every price valid, same count as last run.
+Recipe updated. Saved books.csv
+```
+
+If a repair can't be verified, it stops instead of guessing:
+
+```
+"price" stopped matching and could not be repaired safely (2 possible matches).
+Nothing was saved. Fix it with: scrapewizard edit books.recipe.yaml
+```
+
+**Nothing was found**
+
+```
+Couldn't find a repeating list on this page.
+Try:  scrapewizard <url> --like "a value you can see on the page"
+  or: scrapewizard <url> --ai
+```
+
+### 6.6 How messages are written
+
+- A run ends with at most three lines: what was saved, how many rows, what to do next.
+- An error has three parts: what happened, the likely reason, the command to try.
+- No raw tracebacks unless `-v` is set; the full detail goes to a log file whose path is shown.
+- Progress shows real steps as they happen. Nothing waits on a timer.
+
+### 6.7 Today versus the new flow
+
+| | Today | New |
+|---|---|---|
+| Setup before first result | AI key required | None |
+| Commands | 8 | 4 |
+| Modes | 5 | 1 |
+| Questions in a normal run | Up to 17 possible | 1 (0 with `--yes`) |
+| Browser window | Every build | Only when sign-in or a block needs you, with a reason |
+| Output location | Hidden project folder with an ID | Current folder, readable names |
+| Run again | Locate and run a generated script | `scrapewizard run <recipe>` |
+| When the site changes | Rebuild with AI | Verified self-repair, or a clear stop |
+
+### 6.8 Which phase delivers which part of the flow
+
+| Flow piece | Delivered by (see §8) |
+|---|---|
+| URL as a plain argument, files in the current folder, no timer waits | Phase 0 |
+| `run <recipe>`, retiring hidden projects | Phase 1 |
+| Works with no AI key; preview and single question; `--like`; one mode | Phase 2 |
+| "No browser needed" fast path; login only when required | Phase 3 |
+| "The site changed" repair messages | Phase 4 |
+| "12 new, 3 changed" summaries and exit codes for scheduling | Phase 5 |
+| `edit` with point-and-click | Phase 2 (basic), refined later |
+
+---
+
+## 7. Part B — How the code should work: design rules
 
 1. **Recipe, not code.** The build output is a small YAML/JSON recipe (URL, how to fetch, the
    repeating container, fields with selector ladders and types, pagination, checks). One
@@ -148,7 +332,7 @@ checks:
 
 ---
 
-## 7. Improvement plan
+## 8. Part B — Improvement plan
 
 ### Phase 0 — Quick wins (days)
 - Remove the artificial sleeps in `_progress_step`; show real step status instead.
@@ -161,12 +345,15 @@ checks:
   - keep one spinner/prompt library
   - import LLM SDKs lazily, each behind its own extra
 - Fix or mark the failing hardware-detection test.
+- Fix the two confirmed defects: CSV export on uneven records and pagination selectors (§10).
+- Take the URL as a plain argument and save output in the current folder (§6).
 - **Result:** faster builds, a much smaller install, same features.
 
 ### Phase 1 — Recipe format and runtime
 - Define the recipe schema (above) and a runtime that executes it: fetch, select, type-convert,
   paginate, dedupe, export.
 - `scrapewizard run recipe.yaml` runs one with no build step.
+- Recipe and data files replace the hidden project folders; `list`, `resume` and `clean` are retired (§6).
 - The LLM path changes to "return a recipe" (validated against the schema) instead of "return
   Python."
 
@@ -176,6 +363,7 @@ checks:
   name fields from type and position.
 - Use the picker for corrections: click a field to add, rename or remove it.
 - `--ai` becomes an opt-in polish step.
+- Replace the five modes and the prompt sequence with the single preview-and-confirm flow (§6).
 
 ### Phase 3 — Fetch ladder
 - **Embedded data first:** look for JSON-LD, `__NEXT_DATA__` and similar payloads and map them
@@ -198,7 +386,7 @@ checks:
 ### Phase 5 — Data quality and change detection
 - Each run writes a short report: records, valid/invalid, per-field fill rate, duplicates.
 - Compare with the previous run and flag drift ("rating fill rate 97% → 88%").
-- `scrapewizard check recipe.yaml` exits non-zero when checks fail, so cron or CI can alert.
+- `scrapewizard run recipe.yaml` exits non-zero when checks fail, so cron or CI can alert (no separate `check` command; see §6.3).
 
 ### Phase 6 — Optional extras (only if asked for)
 - `stealth` extra: patchright for the browser, curl_cffi for HTTP.
@@ -212,7 +400,7 @@ billing, or a dashboard. Those are other products and they'd end "lightweight."
 
 ---
 
-## 8. Suggested order and first milestone
+## 9. Suggested order and first milestone
 
 Phase 0 → 1 → 2 gives the headline: **`pip install`, point at a URL, get data, no API key.**
 Phases 3 and 4 add the two things competitors lack together: the cheapest-fetch ladder and
@@ -220,7 +408,7 @@ data-verified healing. Phase 5 turns it into something you can leave running.
 
 ---
 
-## 9. What to borrow, project by project
+## 10. Part B — What to borrow, project by project
 
 A second research pass looked at *how* specific projects solve problems ScrapeWizard has. Each
 row is a technique to adopt, not a tool to copy.
