@@ -32,6 +32,7 @@ CHROME_TOKEN_RE = re.compile(r"^(?:(?:sub|top|main|side|site|global|primary|foot
 VOWELS = set("aeiouy")
 # A value in a table cell, addressed from its row: ":scope > td:nth-of-type(3)" or deeper inside that cell.
 TABLE_CELL_RE = re.compile(r"^:scope > (t[dh](?::nth-of-type\(\d+\))?)(?= |$)")
+TABLE_CELL_ONLY_RE = re.compile(r"^:scope > t[dh]:nth-of-type\(\d+\)$")
 HEADING_RE = re.compile(r"(^|[\s>])h[1-6]([.\s>:]|$)")
 MIN_ITEMS = 3          # fewer repeats than this is not a list
 SAMPLE_SIZE = 12       # items inspected when discovering fields
@@ -103,45 +104,69 @@ def _same_elements(a: List[Tag], b: List[Tag]) -> bool:
     return len(a) == len(b) and all(x is y for x, y in zip(a, b))
 
 
-def _anchor_selector(tag: Tag, soup: BeautifulSoup, cache: Dict[str, List[Tag]]) -> Optional[str]:
-    """A selector matching exactly this one element, from its id or classes.
+def _tag_index(root: Tag) -> Dict[str, List[Tuple[Tag, frozenset]]]:
+    """Every element under ``root`` by tag name, with its classes, for fast uniqueness checks."""
+    index: Dict[str, List[Tuple[Tag, frozenset]]] = defaultdict(list)
+    for el in root.find_all(True):
+        index[el.name].append((el, frozenset(_classes(el))))
+    return index
 
-    ``cache`` holds earlier lookups: hundreds of sibling blocks ask about the
-    same few selectors, and each lookup scans the whole page.
+
+class _PageIndex:
+    """Every element of the page by tag name and by id, built in one pass.
+
+    "Which elements does ``li.card`` select?" and "is ``#results`` unique?" are
+    asked hundreds of times while looking for lists. Answering from this index
+    is a lookup; asking the selector engine is a scan of the whole page each time,
+    which on a large page (a long Wikipedia table) took most of a minute in total.
     """
-    options = []
+
+    def __init__(self, soup: BeautifulSoup):
+        self.by_tag = _tag_index(soup)
+        self.id_count: Counter = Counter()
+        for members in self.by_tag.values():
+            for el, _ in members:
+                if el.get("id"):
+                    self.id_count[el["id"]] += 1
+        self._unique: Dict[Tuple[str, frozenset], bool] = {}
+
+    def select(self, name: str, classes: Iterable[str]) -> List[Tag]:
+        """What ``name.class1.class2`` selects, in page order."""
+        wanted = frozenset(classes)
+        return [el for el, has in self.by_tag.get(name, ()) if wanted <= has]
+
+    def is_only(self, name: str, classes: Iterable[str]) -> bool:
+        key = (name, frozenset(classes))
+        if key not in self._unique:
+            self._unique[key] = len(self.select(name, key[1])) == 1
+        return self._unique[key]
+
+
+def _anchor_selector(tag: Tag, index: _PageIndex) -> Optional[str]:
+    """A selector matching exactly this one element, from its id or classes."""
     tag_id = tag.get("id")
-    if tag_id and CSS_SAFE_RE.match(tag_id) and is_stable_id(tag_id):
-        options.append(f"#{tag_id}")
-    if _stable_classes(tag):
-        options.append(_simple_selector(tag))
-    for option in options:
-        if option not in cache:
-            cache[option] = soup.select(option)
-        if _same_elements(cache[option], [tag]):
-            return option
+    if tag_id and CSS_SAFE_RE.match(tag_id) and is_stable_id(tag_id) and index.id_count[tag_id] == 1:
+        return f"#{tag_id}"
+    classes = _stable_classes(tag)
+    if classes and index.is_only(tag.name, classes):
+        return _simple_selector(tag)
     return None
 
 
 def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]:
     """Yield (selector, items) for every repeating block worth inspecting."""
     seen = set()
-    anchor_cache: Dict[str, List[Tag]] = {}
+    index = _PageIndex(soup)
 
-    def offer(selector: str, expected: Optional[List[Tag]] = None):
-        try:
-            items = soup.select(selector)
-        except Exception:
-            return None
+    def offer(name: str, classes: Tuple[str, ...]):
+        items = index.select(name, classes)
         if len(items) < MIN_ITEMS:
-            return None
-        if expected is not None and not _same_elements(items, expected):
             return None
         key = tuple(id(i) for i in items)
         if key in seen:
             return None
         seen.add(key)
-        return selector, items
+        return name + "".join(f".{c}" for c in classes), items
 
     # 1. Elements sharing a class signature anywhere on the page (cards, rows with classes).
     groups: Dict[Tuple[str, Tuple[str, ...]], int] = Counter()
@@ -154,7 +179,7 @@ def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]
     for (name, classes), count in groups.most_common():
         if count < MIN_ITEMS:
             break
-        found = offer(name + "".join(f".{c}" for c in classes))
+        found = offer(name, classes)
         if found:
             yield found
 
@@ -180,7 +205,7 @@ def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]
             for _ in range(6):  # climb until an ancestor can be named uniquely
                 if not isinstance(node, Tag) or node.name in ("html", "[document]"):
                     break
-                anchor = _anchor_selector(node, soup, anchor_cache)
+                anchor = _anchor_selector(node, index)
                 if anchor:
                     # The short path first. If the page has look-alike blocks (several tables with
                     # the same classes), the path with positions picks out exactly this one.
@@ -250,18 +275,40 @@ def _value_nodes(item: Tag) -> Iterable[Tuple[Tag, Optional[str], str]]:
             yield el, None, text
 
 
-def _relative_selector(item: Tag, el: Tag, common_classes: set) -> str:
-    """CSS for ``el`` relative to ``item``: by class if unique, else by position."""
+def _relative_selector(item: Tag, el: Tag, common_classes: set,
+                       index: Optional[Dict[str, List[Tuple[Tag, frozenset]]]] = None) -> str:
+    """CSS for ``el`` relative to ``item``: by class if unique, else by position.
+
+    ``index`` (from ``_tag_index(item)``) lets "is this selector unique within
+    the item?" be answered by counting, instead of running the selector engine
+    over the item for every value in it.
+    """
     if el is item:
         return ""
+    index = index if index is not None else _tag_index(item)
+
+    def wanted(tag: Tag) -> frozenset:
+        return frozenset(c for c in _stable_classes(tag) if c in common_classes)
+
+    def matching(tag_name: str, classes: frozenset) -> List[Tag]:
+        # What "tag.class1.class2" selects: same tag, at least those classes.
+        return [other for other, has in index.get(tag_name, ()) if classes <= has]
+
     simple = _simple_selector(el, common_classes)
-    if _same_elements(item.select(simple), [el]):
+    same_kind = matching(el.name, wanted(el))
+    if len(same_kind) == 1:
         return simple
     parent = el.parent
     if isinstance(parent, Tag) and parent is not item:
-        qualified = f"{_simple_selector(parent, common_classes)} > {simple}"
-        if _same_elements(item.select(qualified), [el]):
-            return qualified
+        parent_classes = wanted(parent)
+        # The item itself may be the matching parent: a selector run on the item sees it too.
+        with_parent = [
+            other for other in same_kind
+            if isinstance(other.parent, Tag)
+            and other.parent.name == parent.name and parent_classes <= frozenset(_classes(other.parent))
+        ]
+        if len(with_parent) == 1:
+            return f"{_simple_selector(parent, common_classes)} > {simple}"
     parts = []
     node = el
     while node is not item and isinstance(node.parent, Tag):
@@ -336,10 +383,11 @@ def _discover_fields(items: List[Tag], partners: Optional[List[Optional[Tag]]] =
             roots.append((partners[index], "+"))
         position = 0
         for root, prefix in roots:
+            index_of_root = _tag_index(root)
             for count, (el, attr, value) in enumerate(_value_nodes(root)):
                 if count >= MAX_VALUE_NODES:
                     break
-                selector = f"{prefix} {_relative_selector(root, el, common_classes)}".strip()
+                selector = f"{prefix} {_relative_selector(root, el, common_classes, index_of_root)}".strip()
                 key = (selector, attr)
                 draft = drafts.get(key)
                 if draft is None:
@@ -463,7 +511,9 @@ def _drop_sublists(drafts: List[_FieldDraft], sampled: int) -> List[_FieldDraft]
 
     Tags, sizes or badges inside a card show up as ``a:nth-of-type(1)``,
     ``(2)``, ``(3)`` with fewer and fewer items having each. They are not
-    columns. Table cells, which every row has, are kept.
+    columns. Table cells are kept when the rows agree with each other, even if
+    not every sampled row has them: the heading row of a plain table is one of
+    the rows, and it has ``th`` cells where the others have ``td``.
     """
     families: Dict[Tuple[str, Optional[str]], List[_FieldDraft]] = defaultdict(list)
     for draft in drafts:
@@ -476,7 +526,8 @@ def _drop_sublists(drafts: List[_FieldDraft], sampled: int) -> List[_FieldDraft]
         if len(members) < 2:
             continue
         counts = [len(m.values) for m in members]
-        if min(counts) < 0.9 * max(counts) or max(counts) < sampled:
+        cells = all(TABLE_CELL_ONLY_RE.match(m.selectors[0].split("@")[0]) for m in members)
+        if min(counts) < 0.9 * max(counts) or (max(counts) < sampled and not cells):
             dropped.update(id(m) for m in members)
     return [d for d in drafts if id(d) not in dropped]
 
@@ -577,23 +628,49 @@ def _table_columns(row: Tag) -> Dict[str, str]:
     return columns
 
 
-def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Optional[Dict[str, str]] = None) -> None:
+def _cell_step(row: Tag, css: str) -> Optional[str]:
+    """The selector step (``td:nth-of-type(2)``) of the cell in ``row`` holding what ``css`` selects."""
+    try:
+        el = row.select_one(css) if css else None
+    except Exception:
+        return None
+    while isinstance(el, Tag) and el.parent is not row:
+        el = el.parent
+    if not isinstance(el, Tag) or el.name not in ("td", "th"):
+        return None
+    same = row.find_all(el.name, recursive=False)
+    position = next(i for i, cell in enumerate(same, 1) if cell is el)
+    return el.name if len(same) == 1 else f"{el.name}:nth-of-type({position})"
+
+
+def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Optional[Dict[str, str]] = None,
+                 row: Optional[Tag] = None) -> None:
+    """Give every field a column name. ``columns`` and ``row`` come from a table with headings."""
     by_type = {"money": "price", "image": "image", "url": "url", "date": "date", "email": "email"}
     columns = columns or {}
 
     def column_name(f: _FieldDraft) -> Optional[str]:
-        cell = TABLE_CELL_RE.match(f.selectors[0])
-        return columns.get(cell.group(1)) if cell else None
+        css = f.selectors[0].split("@")[0]
+        cell = TABLE_CELL_RE.match(css)
+        if cell:
+            return columns.get(cell.group(1))
+        if columns and row is not None and not css.startswith("+") and not _class_based_name(css):
+            # Not the cell itself but something in it: the country name is a link inside the cell.
+            # A value with a class of its own keeps that name ("wins" says more than "W").
+            return columns.get(_cell_step(row, css) or "")
+        return None
 
     def average_length(f: _FieldDraft) -> float:
         return sum(len(v) for v in f.values.values()) / max(len(f.values), 1)
 
     def title_strength(f: _FieldDraft) -> int:
-        """2: a heading or a title attribute. 1: link text. 0: not a title."""
+        """2: a heading, a title attribute or a class that says "title". 1: link text. 0: not a title."""
         if f.type != "text" or average_length(f) < 3:
             return 0
         css = f.selectors[0].split("@")[0]
-        if f.attr == "title" or HEADING_RE.search(css):
+        # "list-title" on a plain div is the page saying which value is the title.
+        says_title = {"title", "headline"} & set((_class_based_name(css) or "").split("_"))
+        if f.attr == "title" or HEADING_RE.search(css) or says_title:
             return 2
         return 1 if re.search(r"(^|[\s>])a([.\s:]|$)", css) else 0
 
@@ -936,7 +1013,8 @@ def rank_candidates(soup: BeautifulSoup, likes: Optional[List[str]] = None) -> L
     first = _settle_extent(ordered[0], candidates)
     ordered = [first] + [c for c in ordered if c is not first]
     for candidate in ordered:
-        _name_fields(candidate.fields, candidate.selector, _table_columns(candidate.items[-1]))
+        last_row = candidate.items[-1]
+        _name_fields(candidate.fields, candidate.selector, _table_columns(last_row), last_row)
         if likes:
             wanted = [clean_text(like).lower() for like in likes]
             candidate.fields.sort(
