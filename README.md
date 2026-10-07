@@ -2,6 +2,10 @@
 
 **Point it at a page, get the data. No AI key needed.**
 
+[![CI](https://github.com/pras-ops/ScrapeWizard/actions/workflows/ci.yml/badge.svg)](https://github.com/pras-ops/ScrapeWizard/actions/workflows/ci.yml)
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ![ScrapeWizard reads a list of books, saves it with a recipe, runs the recipe again, then reads all ten pages of a JavaScript-drawn site without a browser](docs/demo.gif)
 
 The same first run, as text:
