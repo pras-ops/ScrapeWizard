@@ -1,7 +1,7 @@
 """The recipe data model, with loading, saving and validation."""
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -41,6 +41,11 @@ class Recipe:
     pagination: Dict[str, Any] = field(default_factory=lambda: {"type": "none"})
     checks: Dict[str, Any] = field(default_factory=dict)
     history: List[Dict[str, str]] = field(default_factory=list)  # repairs made, oldest first
+    # Item pages: ``follow`` names the list field holding each item's address, and
+    # ``detail_fields`` are read from that page. Their selectors apply to the whole
+    # page and may also be ``jsonld:path.to.key`` or ``meta:name``.
+    follow: Optional[str] = None
+    detail_fields: List[Field] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
@@ -54,9 +59,32 @@ class Recipe:
             "pagination": dict(self.pagination),
             "checks": dict(self.checks),
         }
+        if self.follow and self.detail_fields:
+            data["detail"] = {
+                "follow": self.follow,
+                "fields": {f.name: {"select": list(f.select), "type": f.type} for f in self.detail_fields},
+            }
         if self.history:
             data["history"] = [dict(entry) for entry in self.history]
         return data
+
+
+def _parse_fields(raw_fields: Dict[str, Any]) -> List[Field]:
+    fields = []
+    for name, spec in raw_fields.items():
+        if isinstance(spec, str):
+            spec = {"select": [spec]}
+        if not isinstance(spec, dict) or "select" not in spec:
+            raise RecipeError(f"Field '{name}' needs a 'select' entry.")
+        select = spec["select"]
+        select = [select] if isinstance(select, str) else list(select)
+        if not all(isinstance(s, str) for s in select) or not select:
+            raise RecipeError(f"Field '{name}': 'select' must be a selector or a list of selectors.")
+        field_type = spec.get("type", "text")
+        if field_type not in FIELD_TYPES:
+            raise RecipeError(f"Field '{name}': unknown type '{field_type}'. Use one of: {', '.join(FIELD_TYPES)}.")
+        fields.append(Field(name=str(name), select=select, type=field_type))
+    return fields
 
 
 def recipe_from_dict(data: Any) -> Recipe:
@@ -74,20 +102,18 @@ def recipe_from_dict(data: Any) -> Recipe:
     if not isinstance(raw_fields, dict) or not raw_fields:
         raise RecipeError("'collection.fields' needs at least one field.")
 
-    fields = []
-    for name, spec in raw_fields.items():
-        if isinstance(spec, str):
-            spec = {"select": [spec]}
-        if not isinstance(spec, dict) or "select" not in spec:
-            raise RecipeError(f"Field '{name}' needs a 'select' entry.")
-        select = spec["select"]
-        select = [select] if isinstance(select, str) else list(select)
-        if not all(isinstance(s, str) for s in select) or not select:
-            raise RecipeError(f"Field '{name}': 'select' must be a selector or a list of selectors.")
-        field_type = spec.get("type", "text")
-        if field_type not in FIELD_TYPES:
-            raise RecipeError(f"Field '{name}': unknown type '{field_type}'. Use one of: {', '.join(FIELD_TYPES)}.")
-        fields.append(Field(name=str(name), select=select, type=field_type))
+    fields = _parse_fields(raw_fields)
+
+    follow = None
+    detail_fields: List[Field] = []
+    detail = data.get("detail")
+    if detail is not None:
+        if not isinstance(detail, dict) or not detail.get("follow") or not isinstance(detail.get("fields"), dict):
+            raise RecipeError("'detail' needs 'follow' (a field holding each item's address) and 'fields'.")
+        follow = str(detail["follow"])
+        if follow not in {f.name for f in fields}:
+            raise RecipeError(f"'detail.follow' names '{follow}', which is not one of the list's fields.")
+        detail_fields = _parse_fields(detail["fields"])
 
     fetch = data.get("fetch", "http")
     if fetch not in FETCH_MODES:
@@ -114,6 +140,8 @@ def recipe_from_dict(data: Any) -> Recipe:
         pagination=dict(pagination),
         checks=dict(checks),
         history=[{str(k): str(v) for k, v in entry.items()} for entry in history],
+        follow=follow,
+        detail_fields=detail_fields,
     )
 
 

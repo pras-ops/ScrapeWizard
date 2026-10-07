@@ -1,18 +1,24 @@
 """The recipe runtime: fetch pages, read records, follow pagination, run checks."""
+import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from scrapewizard.recipe.fetch import BrowserSession, fetch
-from scrapewizard.recipe.model import IN_PLACE_PAGINATION, Recipe, RecipeError
+from scrapewizard.core.logging import log
+from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch
+from scrapewizard.recipe.model import IN_PLACE_PAGINATION, Field, Recipe, RecipeError
 from scrapewizard.recipe.types import clean_text, convert
 from scrapewizard.recon.pagination import find_next_url
 
 ATTR_RE = re.compile(r"^[\w:-]+$")
+# Item pages read at the same time over HTTP. Browsers open about this many
+# connections to one site, so it is not an unusual load.
+ITEM_PAGE_WORKERS = 4
 # A required field may be empty in a few records before the check fails.
 DEFAULT_REQUIRED_COVERAGE = 0.9
 
@@ -55,6 +61,73 @@ def read_value(item: Tag, spec: str) -> Optional[str]:
     else:
         raw = target.get_text(" ", strip=True)
     return clean_text(raw) or None
+
+
+def jsonld_objects(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    """Every object in the page's JSON-LD blocks, including those inside ``@graph``."""
+    found: List[Dict[str, Any]] = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or script.get_text() or "")
+        except ValueError:
+            continue  # sites do publish broken JSON-LD; skip that block
+        pending = [data]
+        while pending:
+            node = pending.pop(0)
+            if isinstance(node, list):
+                pending[0:0] = node
+            elif isinstance(node, dict):
+                found.append(node)
+                if isinstance(node.get("@graph"), list):
+                    pending.extend(node["@graph"])
+    return found
+
+
+def _dig(node: Any, path: str) -> Any:
+    """Follow a dotted path through nested JSON. A list is entered at its first element."""
+    for key in path.split("."):
+        if isinstance(node, list):
+            node = node[0] if node else None
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    if isinstance(node, list):
+        node = node[0] if node else None
+    return node if isinstance(node, (str, int, float)) and not isinstance(node, bool) else None
+
+
+def read_document_value(soup: BeautifulSoup, spec: str,
+                        structured: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
+    """Read one value from a whole page.
+
+    ``spec`` is CSS (optionally ``@attr``), ``jsonld:path.to.key`` for embedded
+    structured data, or ``meta:name`` for a meta tag's content.
+    """
+    if spec.startswith("jsonld:"):
+        for node in structured if structured is not None else jsonld_objects(soup):
+            value = _dig(node, spec[len("jsonld:"):])
+            if value is not None and clean_text(value):
+                return clean_text(value)
+        return None
+    if spec.startswith("meta:"):
+        name = spec[len("meta:"):]
+        tag = soup.find("meta", attrs={"name": name}) or soup.find("meta", attrs={"property": name})
+        return clean_text(tag.get("content")) or None if tag is not None else None
+    return read_value(soup, spec)
+
+
+def extract_detail(soup: BeautifulSoup, fields: List[Field], base_url: str) -> Dict[str, Any]:
+    """Read an item page's fields."""
+    structured = jsonld_objects(soup)
+    record = {}
+    for f in fields:
+        value = None
+        for spec in f.select:
+            value = read_document_value(soup, spec, structured)
+            if value:
+                break
+        record[f.name] = convert(value, f.type, base_url)
+    return record
 
 
 def extract_records(soup: BeautifulSoup, recipe: Recipe, base_url: str) -> List[Dict[str, Any]]:
@@ -125,6 +198,7 @@ def run_recipe(
     delay: float = 0.3,
     on_page: Optional[Callable[[int, int], None]] = None,
     session_factory: Callable[[], Any] = BrowserSession,
+    on_item: Optional[Callable[[int, int], None]] = None,
 ) -> RunResult:
     """Run a recipe and return its records with any failed checks.
 
@@ -138,14 +212,59 @@ def run_recipe(
         delay: Seconds to wait between pages, to be polite to the site.
         on_page: Called with (pages read, records so far) after each page.
         session_factory: Creates the browser session. Replaceable for tests.
+        on_item: Called with (item pages read, total) while following items.
     """
     limit = max_pages if max_pages is not None else int(recipe.pagination.get("max_pages") or 1)
     in_place = recipe.pagination.get("type") in IN_PLACE_PAGINATION
     if fetcher is None and (recipe.fetch == "browser" or in_place):
         with session_factory() as session:
-            return _read_pages(recipe, limit, session.open, session, delay, on_page)
+            return _read_pages(recipe, limit, session.open, session, delay, on_page, on_item)
     fetch_page = fetcher or fetch
-    return _read_pages(recipe, limit, lambda url: fetch_page(url, recipe.fetch), None, delay, on_page)
+    return _read_pages(recipe, limit, lambda url: fetch_page(url, recipe.fetch), None, delay, on_page, on_item)
+
+
+def _follow_items(
+    records: List[Dict[str, Any]],
+    recipe: Recipe,
+    open_url: Callable[[str], str],
+    delay: float,
+    on_item: Optional[Callable[[int, int], None]],
+    parallel: bool,
+) -> None:
+    """Open each item's own page and add its fields to the record.
+
+    Over plain HTTP a few pages are read at a time. In a browser there is one
+    page, so they are read one after another.
+    """
+    targets = [r for r in records if r.get(recipe.follow)]
+
+    def read(record: Dict[str, Any]) -> Dict[str, Any]:
+        address = str(record[recipe.follow])
+        try:
+            return extract_detail(parse(open_url(address)), recipe.detail_fields, address)
+        except FetchError as e:
+            # One unreachable item page should not lose the whole run; its fields stay empty.
+            log(f"Item page could not be read: {address} ({e})", level="warning")
+            return {}
+
+    if parallel and len(targets) > 1:
+        with ThreadPoolExecutor(max_workers=ITEM_PAGE_WORKERS) as pool:
+            pending = {pool.submit(read, record): record for record in targets}
+            for done, future in enumerate(as_completed(pending), 1):
+                pending[future].update(future.result())
+                if on_item:
+                    on_item(done, len(targets))
+    else:
+        for index, record in enumerate(targets, 1):
+            record.update(read(record))
+            if on_item:
+                on_item(index, len(targets))
+            if index < len(targets):
+                time.sleep(delay)
+
+    for record in records:
+        for f in recipe.detail_fields:
+            record.setdefault(f.name, None)
 
 
 def _read_pages(
@@ -155,6 +274,7 @@ def _read_pages(
     session: Optional[Any],
     delay: float,
     on_page: Optional[Callable[[int, int], None]],
+    on_item: Optional[Callable[[int, int], None]] = None,
 ) -> RunResult:
     records: List[Dict[str, Any]] = []
     seen_records = set()
@@ -198,5 +318,8 @@ def _read_pages(
         url = next_url
         visited.add(url)
         html = open_url(url)
+
+    if recipe.follow and recipe.detail_fields:
+        _follow_items(records, recipe, open_url, min(delay, 0.2), on_item, parallel=session is None)
 
     return RunResult(records=records, pages=pages, failures=evaluate_checks(records, recipe))

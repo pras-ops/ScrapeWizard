@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from scrapewizard.recipe.builder import BuildResult, build_recipe
+from scrapewizard.recipe.detail import build_detail_fields
 from scrapewizard.recipe.extract import RunResult, run_recipe
 from scrapewizard.recipe.extract import parse
 from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch, fetch_http
@@ -178,10 +179,66 @@ def _output_name(out: Optional[str], fallback: str) -> str:
     return str(path.with_suffix("")) if path.suffix.lstrip(".") in FORMATS else out
 
 
-def _run_pages(recipe: Recipe, pages: int) -> RunResult:
-    def progress(done: int, rows: int) -> None:
+def _run_pages(recipe: Recipe, pages: Optional[int]) -> RunResult:
+    """Run a recipe, printing progress. ``pages`` of None means what the recipe says."""
+    limit = pages if pages is not None else int(recipe.pagination.get("max_pages") or 1)
+
+    def page_progress(done: int, rows: int) -> None:
         console.print(f"  page {done}: {rows} rows so far")
-    return run_recipe(recipe, max_pages=pages, on_page=progress if pages > 1 else None)
+
+    def item_progress(done: int, total: int) -> None:
+        if done % 10 == 0 or done == total:
+            console.print(f"  item pages: {done} of {total}")
+
+    return run_recipe(recipe, max_pages=pages, on_page=page_progress if limit > 1 else None,
+                      on_item=item_progress)
+
+
+ITEM_PAGES_SAMPLED = 3
+
+
+def _add_item_pages(recipe: Recipe, records: List[Dict[str, Any]]) -> None:
+    """Look at a few item pages and add the fields they hold to the recipe."""
+    link = None
+    for f in recipe.fields:
+        values = [str(r[f.name]) for r in records if r.get(f.name)]
+        if f.type == "url" and values and len(set(values)) >= 0.9 * len(records):
+            link = f.name
+            break
+    if link is None:
+        console.print("The items have no link of their own to follow. Continuing with the list only.")
+        return
+
+    sample = [r for r in records if r.get(link)][:ITEM_PAGES_SAMPLED]
+    console.print(f"Opening {len(sample)} item pages to see what they hold ...")
+    pages = []
+    try:
+        with BrowserSession() if recipe.fetch == "browser" else _NoSession() as session:
+            for record in sample:
+                address = str(record[link])
+                pages.append(parse(session.open(address) if session else fetch_http(address)))
+    except FetchError as e:
+        console.print(f"{e} Continuing with the list only.")
+        return
+
+    fields = build_detail_fields(pages, sample, [f.name for f in recipe.fields])
+    if not fields:
+        console.print("The item pages hold nothing the list doesn't already have. Continuing with the list only.")
+        return
+    recipe.follow = link
+    recipe.detail_fields = fields
+    names = ", ".join(f.name for f in fields)
+    console.print(f"Each item page adds {len(fields)} fields: {names}", soft_wrap=True)
+
+
+class _NoSession:
+    """Stands in for a browser session when item pages are read over plain HTTP."""
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *exc) -> None:
+        return None
 
 
 def get(
@@ -192,6 +249,7 @@ def get(
     all_pages: bool = typer.Option(False, "--all-pages", help="Follow the list to its last page."),
     out: Optional[str] = typer.Option(None, "--out", "-o", help="File name to save as (without extension)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask; save with the defaults."),
+    follow: bool = typer.Option(False, "--follow", help="Also open each item's own page and collect what it holds."),
     browser: bool = typer.Option(False, "--browser", help="Load the page in a browser even if plain HTTP works."),
 ) -> None:
     """Look at a page, preview the data on it, and save it with a recipe.
@@ -207,6 +265,10 @@ def get(
     console.print()
     _show_preview(result.records)
     console.print()
+    if follow:
+        _add_item_pages(recipe, result.records)
+        console.print()
+
     has_more = result.has_more
     in_place = recipe.pagination.get("type") in ("load_more", "scroll")
     if has_more:
@@ -231,16 +293,18 @@ def get(
         in_place = recipe.pagination.get("type") in ("load_more", "scroll")
 
     records = result.records
-    if wanted > 1 and has_more:
-        if in_place and recipe.fetch != "browser":
+    more_pages = wanted > 1 and has_more
+    if more_pages or recipe.follow:
+        if more_pages and in_place and recipe.fetch != "browser":
             console.print("Following it needs a browser. Starting one ...")
             recipe.fetch = "browser"
         try:
-            records = _run_pages(recipe, wanted).records
+            records = _run_pages(recipe, wanted if more_pages else 1).records
         except FetchError as e:
             raise _fail(str(e))
-        recipe.pagination["max_pages"] = wanted
-        recipe.checks["min_records"] = max(1, len(records) // 2)
+        if more_pages:
+            recipe.pagination["max_pages"] = wanted
+            recipe.checks["min_records"] = max(1, len(records) // 2)
 
     console.print()
     name = _output_name(out, recipe.name)
@@ -284,7 +348,7 @@ def run(
 
     def read() -> RunResult:
         try:
-            return _run_pages(recipe, limit) if limit else run_recipe(recipe)
+            return _run_pages(recipe, limit)
         except (FetchError, RecipeError) as e:
             raise _fail(str(e))
 

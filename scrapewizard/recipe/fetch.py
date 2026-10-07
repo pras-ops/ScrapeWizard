@@ -52,10 +52,26 @@ def decode_body(response: httpx.Response) -> str:
         return response.content.decode("utf-8", errors="replace")
 
 
+_client: Optional[httpx.Client] = None
+
+
+def _http_client() -> httpx.Client:
+    """One client for the whole process, so connections to a site are reused.
+
+    Opening a new connection for every page costs a TLS handshake each time,
+    which dominates when hundreds of item pages are read. The client is safe
+    to share between threads.
+    """
+    global _client
+    if _client is None:
+        _client = httpx.Client(headers=BROWSER_HEADERS, follow_redirects=True)
+    return _client
+
+
 def fetch_http(url: str, timeout: float = 20.0) -> str:
     """Fetch a page with one HTTP request. No JavaScript is run."""
     try:
-        response = httpx.get(url, headers=BROWSER_HEADERS, timeout=timeout, follow_redirects=True)
+        response = _http_client().get(url, timeout=timeout)
     except httpx.TimeoutException as e:
         raise FetchError(f"The site did not answer within {int(timeout)} seconds.") from e
     except httpx.HTTPError as e:
