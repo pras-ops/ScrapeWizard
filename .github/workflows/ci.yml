@@ -22,6 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Many tests drive a real browser (JavaScript pages, "load more", sign-in).
+      - name: Install the browser
+        run: python -m playwright install --with-deps chromium
+
       - name: Run test suite (offline)
         run: pytest tests/ -v --ignore=tests/golden_sites
 
