@@ -8,9 +8,9 @@ the same page really yields records.
 import math
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -33,7 +33,7 @@ VOWELS = set("aeiouy")
 # A value in a table cell, addressed from its row: ":scope > td:nth-of-type(3)" or deeper inside that cell.
 TABLE_CELL_RE = re.compile(r"^:scope > (t[dh](?::nth-of-type\(\d+\))?)(?= |$)")
 TABLE_CELL_ONLY_RE = re.compile(r"^:scope > t[dh]:nth-of-type\(\d+\)$")
-HEADING_RE = re.compile(r"(^|[\s>])h[1-6]([.\s>:]|$)")
+HEADING_RE = re.compile(r"(^|[\s>])h[1-6]([.\s>:\[]|$)")
 MIN_ITEMS = 3          # fewer repeats than this is not a list
 SAMPLE_SIZE = 12       # items inspected when discovering fields
 MIN_COVERAGE = 0.5     # a field must appear in at least half the sampled items
@@ -75,6 +75,7 @@ class _FieldDraft:
     tag: str = ""                      # tag of the element the value was read from
     type: str = "text"
     name: str = ""
+    hints: Dict[str, Counter] = field(default_factory=dict)   # kind of hint -> the words seen, per item
 
 
 @dataclass
@@ -91,13 +92,55 @@ def _classes(tag: Tag) -> List[str]:
     return value if isinstance(value, list) else str(value).split()
 
 
+# Attributes a site puts on elements for its own tests or for search engines. They say what an
+# element is and survive a restyle, which the class names of a component library do not.
+HOOK_ATTRIBUTES = ("data-testid", "data-test", "data-test-id", "data-qa", "data-cy", "itemprop")
+TOKEN_RE = re.compile(r'\.[A-Za-z_][\w-]*|\[[a-z-]+="[^"\]]*"\]')
+HOOK_RE = re.compile(r'\[([a-z-]+)="([^"\]]*)"\]')
+CAMEL_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|\d+")
+
+
+def _hooks(tag: Tag) -> List[str]:
+    """``[data-testid="card-headline"]`` for each usable hook attribute on the element."""
+    found = []
+    for name in HOOK_ATTRIBUTES:
+        value = tag.get(name)
+        if isinstance(value, str) and CSS_SAFE_RE.match(value) and not re.search(r"\d{3,}", value):
+            found.append(f'[{name}="{value}"]')
+    return found
+
+
+def _tokens(tag: Tag) -> List[str]:
+    """Everything a selector for this element may test: its classes and its hooks."""
+    return _classes(tag) + _hooks(tag)
+
+
+def _is_hashed_class(class_name: str) -> bool:
+    """True for short mixed-case names a build tool made up: ``jeApUG``, ``dyeGOh``, ``ewmvhB``.
+
+    They change at the site's next release, so a selector must not rest on them.
+    Real camelCase (``navBar``, ``productCard``) has few, long words.
+    """
+    if not 5 <= len(class_name) <= 8 or not class_name.isalnum():
+        return False
+    if class_name.islower() or class_name.isupper() or not any(c.isupper() for c in class_name[1:]):
+        return False
+    words = CAMEL_WORD_RE.findall(class_name)
+    return len(words) >= 3 or any(w.isupper() and len(w) >= 2 for w in words) or class_name[-1].isupper()
+
+
 def _stable_classes(tag: Tag) -> List[str]:
-    return [c for c in _classes(tag) if CSS_SAFE_RE.match(c) and is_stable_class(c)]
+    """The tokens a selector can safely use: lasting classes, then hooks."""
+    classes = [c for c in _classes(tag) if CSS_SAFE_RE.match(c) and is_stable_class(c) and not _is_hashed_class(c)]
+    return classes + _hooks(tag)
+
+
+def _css(name: str, tokens: Iterable[str]) -> str:
+    return name + "".join(t if t.startswith("[") else f".{t}" for t in tokens)
 
 
 def _simple_selector(tag: Tag, allowed: Optional[set] = None) -> str:
-    classes = [c for c in _stable_classes(tag) if allowed is None or c in allowed]
-    return tag.name + "".join(f".{c}" for c in classes)
+    return _css(tag.name, [c for c in _stable_classes(tag) if allowed is None or c in allowed])
 
 
 def _same_elements(a: List[Tag], b: List[Tag]) -> bool:
@@ -108,7 +151,7 @@ def _tag_index(root: Tag) -> Dict[str, List[Tuple[Tag, frozenset]]]:
     """Every element under ``root`` by tag name, with its classes, for fast uniqueness checks."""
     index: Dict[str, List[Tuple[Tag, frozenset]]] = defaultdict(list)
     for el in root.find_all(True):
-        index[el.name].append((el, frozenset(_classes(el))))
+        index[el.name].append((el, frozenset(_tokens(el))))
     return index
 
 
@@ -168,7 +211,7 @@ def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]
         if key in seen:
             return None
         seen.add(key)
-        return name + "".join(f".{c}" for c in classes), items
+        return _css(name, classes), items
 
     # 1. Elements sharing a class signature anywhere on the page (cards, rows with classes).
     groups: Dict[Tuple[str, Tuple[str, ...]], int] = Counter()
@@ -184,6 +227,27 @@ def _candidate_selectors(soup: BeautifulSoup) -> Iterable[Tuple[str, List[Tag]]]
         found = offer(name, classes)
         if found:
             yield found
+
+    # 1b. Hooks that differ only in a leading word: "dundee-card", "london-card" and
+    #     "chester-card" are all cards, laid out differently. Together they are the list.
+    families: Dict[Tuple[str, str, str], set] = defaultdict(set)
+    for name, members in index.by_tag.items():
+        if name in SKIP_TAGS:
+            continue
+        for tag, _ in members:
+            for attr in HOOK_ATTRIBUTES:
+                value = tag.get(attr)
+                if isinstance(value, str) and CSS_SAFE_RE.match(value) and "-" in value:
+                    families[(name, attr, value.rsplit("-", 1)[1])].add(value)
+    for (name, attr, ending), values in families.items():
+        if len(values) < 2 or not ending.isalpha():
+            continue
+        items = [tag for tag, _ in index.by_tag[name]
+                 if isinstance(tag.get(attr), str) and tag[attr].endswith(f"-{ending}")]
+        key = tuple(id(i) for i in items)
+        if len(items) >= MIN_ITEMS and key not in seen:
+            seen.add(key)
+            yield f'{name}[{attr}$="-{ending}"]', items
 
     # 2. Same-tag siblings (plain <li>, <tr>, <div> lists), reached from an ancestor that can be named.
     #    All siblings of a tag form one group whether or not some carry a class: the rows of a
@@ -277,6 +341,29 @@ def _value_nodes(item: Tag) -> Iterable[Tuple[Tag, Optional[str], str]]:
             yield el, None, text
 
 
+def _element_hints(el: Tag) -> Dict[str, str]:
+    """Words on or around an element that say what its value is, for when no class does.
+
+    ``href``: the last part of a link's address (``/owner/repo/stargazers``).
+    ``icon``: the label of an icon inside it. ``aria``: its own accessible label.
+    Only a hint that is the same on every item is used as a name.
+    """
+    hints: Dict[str, str] = {}
+    if el.name == "a":
+        parts = [part for part in urlsplit(el.get("href") or "").path.split("/") if part]
+        if len(parts) >= 2:  # one part ("/login") is the same link on every item, not a kind of link
+            hints["href"] = parts[-1]
+    icon = el.find(["svg", "img", "i"])
+    if icon is not None:
+        word = clean_text(icon.get("aria-label") or icon.get("alt") or icon.get("title"))
+        if word:
+            hints["icon"] = word
+    label = clean_text(el.get("aria-label"))
+    if label:
+        hints["aria"] = label
+    return hints
+
+
 def _relative_selector(item: Tag, el: Tag, common_classes: set,
                        index: Optional[Dict[str, List[Tuple[Tag, frozenset]]]] = None) -> str:
     """CSS for ``el`` relative to ``item``: by class if unique, else by position.
@@ -307,7 +394,7 @@ def _relative_selector(item: Tag, el: Tag, common_classes: set,
         with_parent = [
             other for other in same_kind
             if isinstance(other.parent, Tag)
-            and other.parent.name == parent.name and parent_classes <= frozenset(_classes(other.parent))
+            and other.parent.name == parent.name and parent_classes <= frozenset(_tokens(other.parent))
         ]
         if len(with_parent) == 1:
             return f"{_simple_selector(parent, common_classes)} > {simple}"
@@ -396,6 +483,9 @@ def _discover_fields(items: List[Tag], partners: Optional[List[Optional[Tag]]] =
                     spec = f"{selector}@{attr}" if attr else selector
                     draft = drafts[key] = _FieldDraft(selectors=[spec], values={}, position=position,
                                                       attr=attr, tag=el.name)
+                if attr is None and index not in draft.values:
+                    for kind, word in _element_hints(el).items():
+                        draft.hints.setdefault(kind, Counter())[word] += 1
                 draft.values.setdefault(index, value)
                 position += 1
 
@@ -450,11 +540,14 @@ def _add_single_class_fallbacks(draft: _FieldDraft, sample: List[Tag]) -> None:
     if primary.startswith("+"):
         return  # read from the element after the item; fallbacks are not derived for those
     head, _, last = primary.rpartition(" ")
-    tag, *classes = last.split(".")
-    if len(classes) < 2 or ":" in last:
+    tokens = TOKEN_RE.findall(last)
+    tag = TOKEN_RE.sub("", last)
+    if len(tokens) < 2 or ":" in tag:
         return
-    for cls in reversed(classes):  # the last class is usually the most specific name
-        variant = f"{head} {tag}.{cls}".strip()
+    # A hook says what the element is, so it is the first fallback; then the last class,
+    # which is usually the most specific name.
+    for token in sorted(reversed(tokens), key=lambda t: not t.startswith("[")):
+        variant = f"{head} {tag}{token}".strip()
         agrees = 0
         for item in sample:
             try:
@@ -558,14 +651,60 @@ def _only_adds_boilerplate(draft: _FieldDraft, others: List[_FieldDraft]) -> boo
 
 def _class_based_name(selector: str) -> Optional[str]:
     last = re.split(r"[\s>]+", selector.split("@")[0].strip())[-1] if selector.strip() else ""
-    classes = [c for c in re.findall(r"\.([A-Za-z_][\w-]*)", last)
+    hooks = [value for _, value in HOOK_RE.findall(last)]
+    classes = [c for c in re.findall(r"\.([A-Za-z_][\w-]*)", HOOK_RE.sub("", last))
                if not _looks_generated(c) and not _is_layout_class(c)]
-    if not classes:
+    if not hooks and not classes:
         return None
     # "list-title mathjax": the class that says what the value is beats the last one.
-    chosen = next((c for c in classes if any(word in c.lower() for word in FIELD_WORDS)), classes[-1])
-    name = re.sub(r"[^a-z0-9]+", "_", chosen.lower()).strip("_")
-    return name if len(name) >= 2 and not name.isdigit() else None
+    # A hook (itemprop, data-testid) was written to say what the element is, so it comes first.
+    fallback = hooks[0] if hooks else classes[-1]
+    chosen = next((c for c in hooks + classes if any(word in c.lower() for word in FIELD_WORDS)), fallback)
+    return _slug(re.sub(r"^(?:u|p|dt)-(?=[a-z])", "", chosen))  # "u-author" is microformat for "author"
+
+
+def _slug(words: str) -> Optional[str]:
+    """``programmingLanguage`` / ``card-headline`` / ``Stars today`` as a column name."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", words)
+    name = re.sub(r"[^a-z0-9]+", "_", spaced.lower()).strip("_")
+    return name if 2 <= len(name) <= 40 and not name.isdigit() else None
+
+
+UNIT_RE = re.compile(r"^[\d.,]+\s?[kKmM]?\+?\s+([A-Za-z][A-Za-z ]{1,24})$")
+LABEL_RE = re.compile(r"^([A-Za-z][A-Za-z ]{1,24}):\s+\S")
+AGE_RE = re.compile(r"^(?:an?|\d+)\s+(?:second|minute|hour|day|week|month|year)s?\s+ago$", re.I)
+
+
+def _hinted_name(f: _FieldDraft) -> Tuple[Optional[str], str]:
+    """A name from what the page says around or in the values, and where it came from.
+
+    Tried when the element has no class or hook of its own: the constant end of
+    its link, an icon's label, the unit after a number ("9 comments"), a label
+    before the value ("Language: Go"), or the look of the value ("3 hours ago").
+    """
+    filled = len(f.values)
+    enough = max(MIN_ITEMS, 0.8 * filled)
+    for kind in ("href", "icon", "aria"):
+        seen = f.hints.get(kind)
+        if seen:
+            word, count = seen.most_common(1)[0]
+            name = _slug(word)
+            if count >= enough and name and re.search(r"[a-z]{2}", name) and len(name) <= 24:
+                return name, kind
+    values = list(f.values.values())
+    if sum(1 for value in values if AGE_RE.match(value)) >= enough:
+        return "age", "age"
+    for pattern, kind in ((UNIT_RE, "unit"), (LABEL_RE, "label")):
+        words = [m.group(1).strip().lower() for m in map(pattern.match, values) if m]
+        # "1 comment" and "9 comments" are the same word.
+        stems = Counter(re.sub(r"s\b", "", word) for word in words)
+        if stems and stems.most_common(1)[0][1] >= enough:
+            stem = stems.most_common(1)[0][0]
+            plural = Counter(w for w in words if re.sub(r"s\b", "", w) == stem).most_common(1)[0][0]
+            name = _slug(plural)
+            if name:
+                return name, kind
+    return None, ""
 
 
 BREAKPOINT_TOKENS = {"xs", "sm", "md", "lg", "xl", "xxl"}
@@ -674,7 +813,7 @@ def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Option
         says_title = {"title", "headline"} & set((_class_based_name(css) or "").split("_"))
         if f.attr == "title" or HEADING_RE.search(css) or says_title:
             return 2
-        return 1 if re.search(r"(^|[\s>])a([.\s:]|$)", css) else 0
+        return 1 if re.search(r"(^|[\s>])a([.\s:\[]|$)", css) else 0
 
     strongest = max((title_strength(f) for f in fields if not column_name(f)), default=0)
     title_field = next((f for f in fields if strongest and not column_name(f)
@@ -682,7 +821,15 @@ def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Option
     if columns:
         title_field = None  # a table already names its columns; none of them is "the title"
 
+    # Fields with no class of their own may still share a named parent: "span.byline > a".
+    def parent_name(f: _FieldDraft) -> Optional[str]:
+        head, arrow, last = f.selectors[0].split("@")[0].rpartition(" > ")
+        return _class_based_name(head) if arrow and not TOKEN_RE.search(last) else None
+
+    parents = Counter(parent_name(f) for f in fields if f.type not in by_type)
+
     unnamed = set()
+    link_noise = set()   # named after their own link's ending: that link adds nothing as a column
     for f in fields:
         selector = f.selectors[0]
         if column_name(f) and f.type not in ("url", "image"):
@@ -695,6 +842,12 @@ def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Option
             f.name = "title"
             continue
         from_class = _class_based_name(selector)
+        if not from_class and f is not title_field:
+            from_class, source = _hinted_name(f)
+            if source == "href":
+                link_noise.add(id(f))
+            if not from_class and parents[parent_name(f)] == 1:
+                from_class = parent_name(f)
         f.name = from_class or ("number" if f.type == "number" else "text")
         if not from_class:
             unnamed.add(id(f))
@@ -709,10 +862,20 @@ def _name_fields(fields: List[_FieldDraft], container: str = "", columns: Option
         # No heading or link text: call the longest field that has no name of its own the title.
         generic = [f for f in fields if id(f) in unnamed and f.type == "text"]
         if generic:
-            max(generic, key=average_length).name = "title"
+            chosen = max(generic, key=average_length)
+            chosen.name = "title"
+            unnamed.discard(id(chosen))
+    elif title_field is not None and not any(f.name in ("description", "summary") for f in fields):
+        # A sentence or more under a title, with no name of its own, is the description.
+        long_text = [f for f in fields if id(f) in unnamed and f.type == "text" and average_length(f) >= 40
+                     and f.selectors[0].lstrip("+ ")]  # not the item's whole text run together
+        if long_text:
+            chosen = max(long_text, key=average_length)
+            chosen.name = "description"
+            unnamed.discard(id(chosen))
 
     _drop_shared_prefix([f for f in fields if id(f) not in unnamed and f.type not in by_type and f.name != "title"])
-    _name_links(fields, unnamed)
+    _name_links(fields, unnamed | link_noise)
 
     used: Counter = Counter()
     for f in fields:
@@ -915,6 +1078,30 @@ def _settle_extent(chosen: _Candidate, candidates: List[_Candidate]) -> _Candida
     return chosen
 
 
+def _widen(chosen: _Candidate, candidates: List[_Candidate]) -> _Candidate:
+    """Prefer the block that holds these items and more of the same kind.
+
+    A news page lays its cards out in several ways, each with its own marker.
+    One layout scores best because its cards are the most alike, but the list a
+    person wants is all the cards. A larger block qualifies when it contains
+    every chosen item and reads nearly all the same fields the same way. Rows
+    of another kind (a table's spacer rows) do not have those fields, so a
+    block that merely surrounds the chosen one does not qualify.
+    """
+    mine = {id(item) for item in chosen.items}
+    wanted = {f.selectors[0] for f in chosen.fields}
+    best = chosen
+    for other in candidates:
+        if other is chosen or other.partners is not None or chosen.partners is not None:
+            continue
+        if len(other.items) <= len(best.items) or not mine < {id(item) for item in other.items}:
+            continue
+        shared = wanted & {f.selectors[0] for f in other.fields}
+        if len(shared) >= 0.8 * len(wanted):
+            best = other
+    return best
+
+
 def _matches(items: List[Tag], wanted: str) -> bool:
     wanted = clean_text(wanted).lower()
     for item in items:
@@ -1012,7 +1199,7 @@ def rank_candidates(soup: BeautifulSoup, likes: Optional[List[str]] = None) -> L
     # Whatever ends up first is checked against every candidate.
     while len(ordered) > 1 and any(_is_wrapper(ordered[0], other) for other in candidates if other is not ordered[0]):
         ordered = ordered[1:]
-    first = _settle_extent(ordered[0], candidates)
+    first = _settle_extent(_widen(ordered[0], candidates), candidates)
     ordered = [first] + [c for c in ordered if c is not first]
     for candidate in ordered:
         last_row = candidate.items[-1]

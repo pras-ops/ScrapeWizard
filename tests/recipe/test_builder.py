@@ -490,3 +490,105 @@ def test_page_with_no_ids_or_classes_at_all_still_gives_its_list():
         "report_url": "https://old.test/paper/1.html",
     }
     assert len(result.records) == 7
+
+
+# --- Names and selectors taken from what the page itself says ---
+
+def component_site_page() -> str:
+    """A site built from components: made-up class names, but markers for its own tests.
+
+    The cards come in three layouts, each with its own marker; all are cards.
+    """
+    def card(kind: str, n: int, summary: bool) -> str:
+        text = f'<p class="eUixcX" data-testid="card-description">What happened in story {n}, told in a sentence or two.</p>'
+        return f"""<div class="jeApUG" data-testid="{kind}-card"><a class="hygVWX" data-testid="internal-link" href="/news/story-{n}">
+              <h2 class="dyeGOh" data-testid="card-headline">Headline of story number {n}</h2>{text if summary else ''}</a>
+              <span class="feNzEJ" data-testid="card-metadata-tag">Region {n % 4}</span></div>"""
+    cards = "".join(card("dundee", n, True) for n in range(1, 9))
+    cards += "".join(card("london", n, True) for n in range(9, 13))
+    cards += "".join(card("chester", n, False) for n in range(13, 18))
+    return f"<html><body><main>{cards}</main></body></html>"
+
+
+def test_test_markers_are_used_instead_of_made_up_class_names():
+    result = build_recipe(component_site_page(), "https://news.test/")
+    recipe_text = str(result.recipe.to_dict())
+    for made_up in ("jeApUG", "hygVWX", "dyeGOh", "eUixcX", "feNzEJ"):
+        assert made_up not in recipe_text
+    fields = {f.name: f.select[0] for f in result.recipe.fields}
+    assert fields["title"] == 'h2[data-testid="card-headline"]'
+    assert fields["url"] == 'a[data-testid="internal-link"]@href'
+    # "card-description" and "card-metadata-tag" lose the prefix they share.
+    assert fields["description"] == 'p[data-testid="card-description"]'
+    assert fields["metadata_tag"] == 'span[data-testid="card-metadata-tag"]'
+
+
+def test_cards_in_several_layouts_are_one_list():
+    result = build_recipe(component_site_page(), "https://news.test/")
+    assert result.recipe.container == 'div[data-testid$="-card"]'
+    assert len(result.records) == 17
+    assert result.records[0]["title"] == "Headline of story number 1"
+    assert result.records[16] == {
+        "title": "Headline of story number 17",
+        "description": None,
+        "metadata_tag": "Region 1",
+        "url": "https://news.test/news/story-17",
+    }
+
+
+def utility_class_site_page() -> str:
+    """Every class is styling. What each value is can only be read from around it."""
+    cards = "".join(
+        f"""<article class="Box-row"><h2 class="h3 lh-condensed"><a href="/org{n}/tool{n}">org{n} / tool{n}</a></h2>
+              <p class="col-9 my-1">Tool {n} is a small program that does one job and does it well.</p>
+              <div class="f6 mt-2"><span class="d-inline-block"><span itemprop="programmingLanguage">Lang{n % 3}</span></span>
+                <a class="d-inline-block" href="/org{n}/tool{n}/stargazers"><svg aria-label="star"></svg> {n * 1100}</a>
+                <a class="d-inline-block" href="/org{n}/tool{n}/forks"><svg aria-label="fork"></svg> {n * 31}</a>
+                <span class="d-inline-block float-sm-right"><svg aria-hidden="true"></svg> {n * 17} stars today</span>
+                <span class="d-inline-block">{n} hours ago</span>
+              </div></article>"""
+        for n in range(1, 9)
+    )
+    return f"<html><body><main>{cards}</main></body></html>"
+
+
+def test_columns_are_named_from_what_surrounds_the_value():
+    result = build_recipe(utility_class_site_page(), "https://code.test/")
+    assert result.recipe.container == "article.Box-row"
+    assert [f.name for f in result.recipe.fields] == [
+        "title",
+        "description",           # the one long text under the title
+        "programming_language",  # itemprop
+        "stargazers",            # where its link goes
+        "forks",
+        "stars_today",           # the words after the number
+        "age",                   # "3 hours ago"
+        "url",
+    ]
+    assert result.records[2] == {
+        "title": "org3 / tool3",
+        "description": "Tool 3 is a small program that does one job and does it well.",
+        "programming_language": "Lang0",
+        "stargazers": 3300,
+        "forks": 93,
+        "stars_today": "51 stars today",
+        "age": "3 hours ago",
+        "url": "https://code.test/org3/tool3",
+    }
+
+
+def test_microformat_classes_and_a_named_parent_give_names():
+    stories = "".join(
+        f"""<li class="story"><a class="u-url" href="https://site{n}.test/post">A story with a headline, number {n}</a>
+              <a class="u-author h-card" href="/~person{n}">person{n}</a>
+              <span class="replies"><a href="/s/{n}">discuss it</a></span>
+              <span class="origin"><a href="/from/{n}">site{n}.test</a></span></li>"""
+        for n in range(1, 8)
+    )
+    result = build_recipe(f"<html><body><main><ol>{stories}</ol></main></body></html>", "https://links.test/")
+    names = [f.name for f in result.recipe.fields]
+    assert "author" in names and "u_author" not in names
+    # "origin" comes from the span around the link, which has no class of its own.
+    assert "origin" in names
+    assert result.records[0]["author"] == "person1"
+    assert result.records[0]["origin"] == "site1.test"
