@@ -1,7 +1,7 @@
 # 🎓 How ScrapeWizard works
 
 This is a tour of the code for someone who wants to understand it, change it or borrow from it.
-For how to *use* the tool, see [README.md](README.md). For why it is built this way and what is
+For how to *use* the tool, see [README.md](../README.md). For why it is built this way and what is
 still open, see [SCRAPER_PLAN.md](SCRAPER_PLAN.md).
 
 ---

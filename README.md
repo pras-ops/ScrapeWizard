@@ -260,8 +260,8 @@ a real browser, which is why the browser install is needed.
 
 ## 📚 More
 
-* [learn.md](learn.md): how it works inside, module by module.
-* [SCRAPER_PLAN.md](SCRAPER_PLAN.md): the research behind it, the plan, and what is done and open.
+* [docs/learn.md](docs/learn.md): how it works inside, module by module.
+* [docs/SCRAPER_PLAN.md](docs/SCRAPER_PLAN.md): the research behind it, the plan, and what is done and open.
 
 ---
 
