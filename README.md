@@ -2,6 +2,10 @@
 
 **Point it at a page, get the data. No AI key needed.**
 
+![ScrapeWizard reads a list of books, saves it with a recipe, runs the recipe again, then reads all ten pages of a JavaScript-drawn site without a browser](docs/demo.gif)
+
+The same first run, as text:
+
 ```
 $ scrapewizard https://books.toscrape.com
 
