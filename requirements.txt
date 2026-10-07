@@ -22,3 +22,4 @@ python-dotenv
 aiohttp
 anthropic>=0.39.0
 httpx>=0.27.0
+pyyaml>=6.0
