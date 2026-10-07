@@ -12,9 +12,11 @@ def write_csv(data: List[Dict[str, Any]], filepath: Path):
     if not data:
         return
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    keys = data[0].keys()
+    # Columns are the union of every record's keys, in first-seen order, so a
+    # field missing from the first record is not dropped (or rejected) later.
+    keys = list(dict.fromkeys(key for row in data for key in row))
     with open(filepath, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=keys)
+        writer = csv.DictWriter(f, fieldnames=keys, restval="")
         writer.writeheader()
         writer.writerows(data)
 

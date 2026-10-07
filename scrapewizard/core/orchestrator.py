@@ -125,7 +125,8 @@ class Orchestrator:
         Args:
             step_num: The index of the current step.
             label: Descriptive name of the step.
-            duration: Simulated duration for the progress bar animation.
+            duration: Unused. Kept so existing call sites stay valid; the step
+                is printed immediately instead of animating on a timer.
         """
         if not self.wizard_mode:
             return
@@ -141,17 +142,7 @@ class Orchestrator:
         elif "Repairing" in label: emoji = STATE_EMOJIS["REPAIR"]
         elif "Final" in label: emoji = STATE_EMOJIS["FINAL_RUN"]
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn(f"{emoji} [bold blue]Step {step_num}/6:[/bold blue] {label}"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            transient=True
-        ) as progress:
-            task = progress.add_task("working", total=100)
-            for _ in range(10):
-                time.sleep(duration / 10)
-                progress.update(task, advance=10)
+        Console().print(f"{emoji} [bold blue]Step {step_num}/6:[/bold blue] {label}")
 
     def _run_internal(self) -> None:
         """Internal execution loop logic."""

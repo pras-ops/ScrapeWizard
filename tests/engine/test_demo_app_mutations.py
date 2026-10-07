@@ -17,8 +17,8 @@ async def test_demo_app_interactive_and_fingerprint(demo_server):
     Tests the login flow, element selection/fingerprinting using the bridge script,
     and checks if the extracted payload matches our expectations.
     """
-    bridge_path = Path("studio/bridge/engine.js")
-    assert bridge_path.exists(), "engine.js must exist"
+    bridge_path = Path("scrapewizard/engine/picker.js")
+    assert bridge_path.exists(), "picker.js must exist"
     bridge_script = bridge_path.read_text(encoding="utf-8")
 
     async with async_playwright() as p:

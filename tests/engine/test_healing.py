@@ -2,7 +2,6 @@ import pytest
 from playwright.async_api import async_playwright
 from scrapewizard.engine.fingerprint import capture_from_page
 from scrapewizard.engine.healing import attempt_self_healing
-from scrapewizard.engine.sandbox import SandboxRunner, StepResult
 
 @pytest.mark.asyncio
 async def test_self_healing_mutations(demo_server, tmp_path):
@@ -87,77 +86,3 @@ async def test_self_healing_mutations(demo_server, tmp_path):
         assert healed_el is None  # Should not match anything because it's removed
 
         await browser.close()
-
-@pytest.mark.asyncio
-async def test_sandbox_runner_with_healing(demo_server, tmp_path):
-    """
-    Run SandboxRunner with a flow definition that requires self-healing.
-    """
-    # 1. Baseline flow definition
-    # Contains a flow that navigates to the login screen, performs login, and clicks checkout.
-    flow_json = tmp_path / "flow.json"
-    
-    # We first run a fresh run to get the fingerprint
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": 1280, "height": 720})
-        page = await context.new_page()
-        await page.goto(demo_server)
-        await page.fill("#username", "tester@scrapewizard.local")
-        await page.fill("#password", "password123")
-        await page.click("#login-submit-btn")
-        await page.wait_for_selector("#checkout-btn")
-        checkout_el = await page.query_selector("#checkout-btn")
-        fp = await capture_from_page(page, checkout_el)
-        fp_dict = fp.to_dict()
-        await browser.close()
-
-    test_definition = {
-        "url": demo_server,
-        "steps": [
-            {
-                "name": "navigate_to_start",
-                "action": "navigate",
-                "value": f"{demo_server}?mutate=id_change", # ID change mutation active
-                "selectors": []
-            },
-            {
-                "name": "fill_username",
-                "action": "fill",
-                "value": "tester@scrapewizard.local",
-                "selectors": [{"kind": "css", "value": "#username"}]
-            },
-            {
-                "name": "fill_password",
-                "action": "fill",
-                "value": "password123",
-                "selectors": [{"kind": "css", "value": "#password"}]
-            },
-            {
-                "name": "click_login",
-                "action": "click",
-                "selectors": [{"kind": "css", "value": "#login-submit-btn"}]
-            },
-            {
-                "name": "click_checkout",
-                "action": "click",
-                "selectors": [{"kind": "css", "value": "#checkout-btn"}], # This will fail standard resolve and trigger healing
-                "fingerprint": fp_dict
-            }
-        ]
-    }
-
-    runner = SandboxRunner(
-        artifacts_dir=str(tmp_path / "artifacts"),
-        baselines_dir=str(tmp_path / "baselines"),
-        flow_name="test_healing_sandbox",
-        headless=True
-    )
-    
-    result = await runner.run(test_definition)
-    assert result.status == "passed"
-    
-    # Verify the checkout step reports healed=True
-    checkout_res = next(r for r in result.step_results if r.step_name == "click_checkout")
-    assert checkout_res.status == "passed"
-    assert checkout_res.healed is True

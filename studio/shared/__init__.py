@@ -1,1 +1,0 @@
-# ScrapeWizard Studio Shared Package

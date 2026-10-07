@@ -22,14 +22,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Many tests drive a real browser (JavaScript pages, "load more", sign-in).
+      - name: Install the browser
+        run: python -m playwright install --with-deps chromium
+
       - name: Run test suite (offline)
         run: pytest tests/ -v --ignore=tests/golden_sites
 
   fresh-install:
     name: Fresh install (${{ matrix.os }})
-    # Verification-ladder rung 2 (PLATFORM_PLAN.md §14.4): a clean machine must be able
-    # to install from requirements.txt and import/construct the core. Catches missing
-    # dependencies (e.g. the yaspin incident) before users do.
+    # A clean machine must be able to install from requirements.txt and import the
+    # whole command line. Catches a missing dependency before users do.
     strategy:
       fail-fast: false
       matrix:
@@ -63,37 +66,3 @@ jobs:
           ))
           Orchestrator(d)
           print("fresh-install check passed")
-
-  frontend:
-    name: Frontend Lint & Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: studio/frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: studio/frontend
-        run: npm ci
-
-      - name: Run lint
-        working-directory: studio/frontend
-        run: npm run lint
-
-      - name: Run type-check
-        working-directory: studio/frontend
-        run: npm run type-check
-
-      - name: Run test
-        working-directory: studio/frontend
-        run: npm run test
-
-      - name: Run build
-        working-directory: studio/frontend
-        run: npm run build
-

@@ -29,7 +29,10 @@ class OpenAIProvider(BaseProvider):
 
     def _get_client(self):
         if not self.client:
-            import openai
+            try:
+                import openai
+            except ImportError as e:
+                raise RuntimeError("The 'openai' package is not installed. Add AI support with: pip install openai") from e
             self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self.client
 
@@ -84,7 +87,10 @@ class AnthropicProvider(BaseProvider):
 
     def _get_client(self):
         if not self.client:
-            import anthropic
+            try:
+                import anthropic
+            except ImportError as e:
+                raise RuntimeError("The 'anthropic' package is not installed. Add AI support with: pip install anthropic") from e
             self.client = anthropic.Anthropic(api_key=self.api_key)
         return self.client
 

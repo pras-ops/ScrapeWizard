@@ -1,3 +1,4 @@
+# Everything needed to develop and test. For a normal install use: pip install .
 typer>=0.9.0
 playwright>=1.40.0
 beautifulsoup4>=4.12.0
@@ -8,7 +9,6 @@ jinja2>=3.1.0
 rich>=13.0.0
 pytest>=7.0.0
 tenacity>=8.2.0
-prompt_toolkit>=3.0.0
 keyring>=24.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
@@ -16,11 +16,8 @@ python-json-logger>=2.0.0
 yaspin>=2.0.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.12.0
-sqlmodel
 fastapi
 uvicorn
-python-dotenv
-aiohttp
-pillow
 anthropic>=0.39.0
 httpx>=0.27.0
+pyyaml>=6.0

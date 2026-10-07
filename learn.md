@@ -1,160 +1,329 @@
-# 🎓 Learning ScrapeWizard: How it was Built
+# 🎓 How ScrapeWizard works
 
-ScrapeWizard is an **Agentic Web Scraper Builder**. Unlike traditional scrapers where you write selectors manually, ScrapeWizard uses AI to understand the page structure, write the code, and even fix itself if the code fails.
-
-**Two Modes:**
-- **🧙 Wizard Mode (Default)**: A clean, "UX Firewall" experience for non-technical users. It suppresses all internal engine diagnostics, technical scores, and LLM signals, focusing solely on the end result.  
-- **🔧 Expert Mode (`--expert`)**: Full technical transparency. Shows the raw engine internals, complexity/hostility scores, state transitions, and detailed LLM debug logs.
-
-This document breaks down the architecture, the logic, and the exact prompts used to build it.
+This is a tour of the code for someone who wants to understand it, change it or borrow from it.
+For how to *use* the tool, see [README.md](README.md). For why it is built this way and what is
+still open, see [SCRAPER_PLAN.md](SCRAPER_PLAN.md).
 
 ---
 
-## 🏗️ 1. Core Architecture
+## 1. The idea in one paragraph
 
-The project follows a **Modular State Machine** architecture. Each step of the process is isolated into a "Phase".
+A scraper is not code here. It is a small **recipe**: where the page is, which element repeats,
+which values to read from each repeat, how to reach the next page, and what a healthy run looks
+like. One runtime can run any recipe. A recipe is built by looking at the page once, with plain
+rules and no AI. Because the recipe is data, it can be checked, compared with the last run, and
+repaired when the site changes.
 
-### ❄️ MVP1 Freeze + Bridge Injection
-As we pivot from the CLI (MVP1) to the Desktop Studio (MVP2), we follow a **risk-minimized** philosophy:
-- **MVP1 Freeze**: The core CLI agents (`Analyst`, `CodeGen`, `Repair`) are frozen to maintain stability for existing users.
-- **Bridge Injection**: New bridge commands (`studio`, `record`, `test`) are "injected" into the CLI as isolated modules.
-- **Studio Isolation**: All MVP2-specific logic resides in the `studio/` directory, importing MVP1 as a library rather than refactoring it.
-
-### The "Phase" Workflow (State Machine)
-1.  **INIT (Stealth Probe Pre-Scan)**: Headed browser probe (3-5s) to detect bot defenses and sign-in requirements, then recommend access mode.
-2.  **GUIDED_ACCESS**: If hostile or auth-heavy, user manually navigates (Login, Filter, Search) in a headed browser.
-3.  **RECON**: Playwright opens the site, performs a **Behavioral Scan** (stability, mutations, scroll dependency), and extracts a snapshot.
-4.  **INTERACTIVE_SOLVE**: If a CAPTCHA is detected, the system pauses for manual human bypass and captures session cookies.
-5.  **LLM_ANALYSIS**: AI looks at the DOM AND the Scan Profile to see if it's scrapable.
-6.  **USER_CONFIG (Decision Gates 1 & 2)**: 
-    - **Gate 1**: User selects output format (CSV, XLSX, JSON).
-    - **Gate 2**: User defines pagination scope (e.g., Limit to 5 pages).
-7.  **CODEGEN**: AI implementation of the **Scraper Runtime Contract (SRC)**. It subclasses `BaseScraper` from `scrapewizard_runtime`.
-8.  **TEST & REPAIR (Gate 3 - Quality Firewall)**: 
-    - The script runs. If it fails or produces >80% missing data, the **Quality Firewall** pauses execution.
-    - Options: 🩺 **Auto-Repair**, 🖐️ **Re-guided Access**, or 🔄 **Configuration Change**.
-9.  **REPAIR LOOP**: If "Auto-Repair" is chosen, the AI performs **Bulletproof Contract** fixes with column-specific hints.
-10. **HARDENING (Phase 6)**: The runtime enforces content-based hashing for robust deduplication and structural guardrails for LLM-generated entry points.
-11. **FINAL_RUN**: The polished plugin runs via the ScrapeWizard SDK, managing the pagination loop and multi-format saving automatically.
-
----
-
-## 🧠 2. The "Brains" (LLM Agents)
-
-We used three specialized "Agents" instead of one giant prompt. This makes the system more reliable.
-
-### Agent A: The Analyst (UnderstandingAgent)
-**Goal**: Look at thousands of lines of HTML + Behavioral signals and find the "interesting" parts.
-**How it works**: We send a structured JSON "Snapshot" + a "Scan Profile" (mutation rates, framework detection). This helps the AI decide if the site is a static page or a complex React SPA.
-
-**The Prompt**:
-```python
-SYSTEM_PROMPT_UNDERSTANDING = """
-You are an expert web scraping analyst. 
-Analyze the provided JSON snapshot of a webpage's DOM structure AND its behavioral scan profile.
-The Scan Profile provides insights into: DOM stability, mutations, scroll dependency, and anti-bot signals.
-"""
+```
+scrapewizard <url>            scrapewizard run books.recipe.yaml
+        │                                   │
+   fetch the page                      load the recipe
+        │                                   │
+   find the list  ── builder.py        read every page ── extract.py
+   (or embedded.py)
+        │                                   │
+   preview, one question               checks pass? ── no ──> repair ── heal.py
+        │                                   │
+   save data + recipe                  compare with last run ── state.py
+                                            │
+                                       save data
 ```
 
-### Agent B: The Plugin Developer (CodeGenerator)
-**Goal**: Write a scraper implementation using the ScrapeWizard SDK.
-**The Scraper Runtime Contract (SRC)**: We forbid the AI from touching infrastructure (Playwright setup, files, retries, pagination loops).
-- **AI owns selection**: The LLM writes logic to find the "Next" button and extract fields.
-- **SDK owns execution**: The `BaseScraper` handles clicking the "Next" button, page counters, and saving formatted data.
+Everything below lives in `scrapewizard/recipe/` (about 3,200 lines) plus one command file,
+`scrapewizard/cli/commands/recipe.py`.
 
-**The Prompt**:
-```python
-SYSTEM_PROMPT_CODEGEN = """
-You MUST:
-- Subclass `BaseScraper`
-- Implement `navigate()`, `get_items()`, and `parse_item()`
-- Use `await self.runtime.smart_wait()` for dynamic stability.
-- **CRITICAL**: Maintain the `if __name__ == "__main__":` entry point.
-"""
+---
+
+## 2. The modules
+
+| File | What it is responsible for |
+|---|---|
+| `model.py` | The recipe itself: loading, validating and saving the YAML |
+| `types.py` | Recognising what a value is (money, number, date, email, link, image, text) and converting it |
+| `fetch.py` | Getting a page: plain HTTP first, a browser when needed; "load more", scrolling, sign-in |
+| `builder.py` | Finding the list on a page and writing a recipe for it. No AI. The largest file |
+| `embedded.py` | Finding and reading a list the page ships as data in a script |
+| `extract.py` | Running a recipe: reading rows, following pages and item pages, evaluating checks |
+| `detail.py` | Working out what to collect from each item's own page (`--follow`) |
+| `state.py` | What the last run saw, and the difference from this one |
+| `heal.py` | Repairing a recipe that stopped matching, and proving the repair |
+| `ai.py` | The optional AI help. Returns a recipe or new column names, never code |
+| `output.py` | Writing CSV, JSON or Excel |
+
+---
+
+## 3. The recipe (`model.py`)
+
+```yaml
+name: books
+url: https://books.toscrape.com
+fetch: http                    # or: browser
+collection:
+  container: article.product_pod
+  fields:
+    title: {select: ["h3 > a@title"], type: text}
+    price: {select: ["p.price_color"], type: money}
+    url:   {select: ["div.image_container > a@href", "h3 > a@href"], type: url}
+pagination: {type: next_link, select: "li.next > a", max_pages: 3}
+checks: {min_records: 30, required: [title, price]}
 ```
 
-### Agent C: The Plugin Doctor (RepairAgent)
-**Goal**: Fix the plugin logic if it fails.
-**Contract Enforcement**: The agent fixes selectors or DOM traversal but is strictly prohibited from modifying the browser runtime.
+Three things in it are worth knowing:
 
-**The Prompt**:
-```python
-SYSTEM_PROMPT_REPAIR = """
-You MUST fix the provided scraper plugin (subclass of `BaseScraper`).
-Ensure selector stability and fix logic errors.
-"""
+- **A field has a ladder of selectors**, tried in order. When a site changes one class, the next
+  rung often still works. `p.instock.availability` is followed by `p.availability`, so an item
+  that is out of stock (and has lost the `instock` class) is still read.
+- **`@attr`** reads an attribute instead of the text: `a@href`, `img@src`, `time@datetime`.
+- **A selector starting with `+`** reads from the element right *after* the item. That is how a
+  record split over two neighbours is one row: a `dt` and the `dd` after it, or a title row and
+  the details row under it.
+
+- **A container starting with `data:`** means the list is read from JSON embedded in the page,
+  not from its HTML (§4.6). The fields are then paths: `price.amount`, `images.0.url`.
+
+Pagination types are `none`, `next_link`, `auto`, `load_more` and `scroll`.
+
+---
+
+## 4. Finding the list without AI (`builder.py`)
+
+This is the heart of the tool. `build_recipe(html, url)` does five things.
+
+### 4.1 Collect every repeating block
+
+Two kinds of repetition are looked for:
+
+1. **Elements that share a tag and classes** anywhere on the page: `article.product_pod`,
+   `tr.team`. Classes that look machine-generated (`css-1x2y3z`, `sc-bdVaJa`, `jeApUG`) or that
+   are layout utilities (`col-sm-4`, `mt-4`) are ignored. Markers a site adds for its own tests
+   or for search engines (`data-testid`, `data-qa`, `itemprop`, …) count like classes and make
+   the better selector: `h2[data-testid="card-headline"]` survives a restyle.
+   Markers that differ only in their first word (`dundee-card`, `london-card`) are also offered
+   together, as `div[data-testid$="-card"]`: the same thing in several layouts.
+2. **Same-tag children of one parent**: the `li`s of a `ul`, the `tr`s of a table. These are
+   reached from the nearest ancestor that can be named uniquely by id or class
+   (`#stats > tbody > tr`). If nothing can be named, the path starts at `body`.
+
+Three or more repeats count as a candidate. The page is indexed once (`_PageIndex`: every
+element by tag and by id) so that "what does `li.card` select?" is a lookup. Asking the selector
+engine each time cost a scan of the whole page per question, which took 11 seconds on a long
+Wikipedia table; the index brought that to 1.
+
+### 4.2 Discover the fields of each candidate
+
+For up to 12 sample items, every piece of text, link, image and date inside the item is
+recorded together with a selector **relative to the item**: by class when that is unique inside
+the item, otherwise by position (`:scope > td:nth-of-type(2)`).
+
+Then the noise is removed:
+
+- a value present in fewer than half the items is dropped;
+- a value that is identical on every item is a label or a button ("Add to basket") and is
+  dropped, unless its class says it is a status (`p.availability` → "In stock");
+- text that is only a cut-off copy of another field ("A Light in the …") is dropped in favour
+  of the full one;
+- the members of a variable-length sub-list (tags, sizes) are not columns;
+- two selectors that give the same values become one field with a two-rung ladder.
+
+If the element after each item also holds data, it is examined the same way and its fields get
+the `+` prefix. Two neighbouring cards with the same shape are two records, not a pair, and are
+left alone.
+
+### 4.3 Score the candidates
+
+A candidate scores higher with more items, more readable fields, fuller fields and real text.
+It scores lower when:
+
+- its values can only be reached by counting ("the 7th div"), which usually means a mixed
+  section and not a record (table cells are exempt);
+- it holds nothing but link text (a menu);
+- it has four items or fewer (usually page sections; a real list of four still wins when
+  nothing larger competes);
+- it sits in page furniture: `nav`, `header`, `footer`, `aside`, or a class such as `menu` or
+  `sidebar`. Being inside `<main>` cancels the class rule, because sites do write
+  `<ul class="menu">` for a list of posts.
+
+### 4.4 Choose between nested blocks
+
+Often several nested elements repeat equally often: the grid cell, the card inside it, the
+stats line inside the card. Two rules settle it:
+
+- **A wrapper is not a record.** If each outer block holds several inner records and has almost
+  no text of its own, the inner one wins.
+- **The fuller record wins, then the cleaner name.** Among blocks that describe the same
+  records, the one holding more fields is chosen (the card, not its stats line); among blocks
+  holding the same fields, the innermost is chosen because it is named for what it is
+  (`article.product_pod`, not `li.col-xs-6`).
+
+- **All the layouts, not one.** If a larger block contains every chosen item and reads nearly
+  all the same fields the same way, it is the list. A table's spacer rows do not have those
+  fields, so a block that merely surrounds the chosen one does not qualify.
+
+`--like "a value"` filters the candidates to those containing that value before any of this.
+
+### 4.5 Name and type the fields
+
+Types come from the values: if at least 60% of a field's values look like money, it is `money`.
+Names come from, in order:
+
+1. the table's heading row, for a table cell or anything inside one;
+2. the type (`price`, `date`, `image`, `url`, `email`);
+3. "title" for a heading, a `title` attribute, a class that says `title` or `headline`, or
+   failing those the main link's text;
+4. a marker on the element (`itemprop="programmingLanguage"` → `programming_language`), then
+   its own class (`span.author` → `author`), preferring one that contains a telling word
+   (title, name, author, price, date, …); microformat prefixes are dropped (`u-author`);
+5. what surrounds the value, when the element itself says nothing: the constant end of its
+   link (`/owner/repo/stargazers` → `stargazers`), an icon's label, "3 hours ago" (`age`), the
+   words after a number ("12 stars today" → `stars_today`), a label before the value
+   ("Language: Go"), or the class of the element around it;
+6. `description` for one long text under a title;
+7. `text`, `text_2`, `number` when nothing says more.
+
+Links are named after the text they belong to: the title's link is `url`, the author's is
+`author_url`. Icon links with no text are dropped when the record has a real link.
+
+Finally the recipe is run against the same page it was built from. Only a recipe that actually
+returns rows is offered to the user.
+
+### 4.6 When the HTML holds no list: data in the page (`embedded.py`)
+
+A page drawn by JavaScript often carries the list it is about to draw as JSON in a script:
+`__NEXT_DATA__`, JSON-LD, or `window.__STATE__ = {...}`. If the HTML gives no list, or only a
+menu, `find_lists` walks every piece of JSON in the page for lists of objects and describes
+each one the same way an HTML block is described: which values are present on most entries,
+which are constant, which read like a name. Internal keys, tokens and whole article bodies are
+left out; a list needs three columns and something name-like, so a menu or a language picker
+in the page's settings is not mistaken for records.
+
+The recipe's container is then `data:` plus the path to the list, and running it needs no
+browser and no selectors. Only real JSON is read. A JavaScript object with unquoted keys is
+code, and guessing at code is not worth being wrong.
+
+A list found only in navigation is marked (`in_menu`). The command then tries the browser, and
+if the menu is still all there is, says so.
+
+---
+
+## 5. Getting pages (`fetch.py`)
+
+- **Plain HTTP first** with one shared connection. The character set is taken from the response
+  header or the page's own `<meta charset>`.
+- **A browser only when needed**: the plain page shows no list (and carries none as data),
+  the site refuses the request, the values given with `--like` are not in the plain page, or
+  the user asks (`--browser`).
+- **Frames.** If the page has up to four frames from the same site, each is fetched and the
+  one with the most rows is used when it clearly beats the page around it. The recipe is
+  written for the frame's address.
+- **One browser session per run.** `BrowserSession` opens once and is reused for every page.
+- **"Load more" and infinite scroll** are both waited on the same way: after the click or the
+  scroll, wait until at least five new elements have appeared and the count has stopped
+  growing. Page height and "network idle" turned out to be unreliable signals.
+- **Sign-in** (`--login`) opens a visible window, the user signs in, and the browser's session
+  is saved to `.scrapewizard/<name>.session.json`. That folder writes its own `.gitignore`,
+  because the file holds login cookies.
+
+---
+
+## 6. Running a recipe (`extract.py`)
+
+`run_recipe` reads page after page until there is no next page, the page limit is reached or a
+page repeats. Rows are de-duplicated. Each value is converted by its type: numbers become
+numbers, links and images become full addresses; money and dates are kept as cleaned text so
+nothing is lost in conversion.
+
+With `detail` in the recipe, each row's link is opened (four at a time over HTTP) and the
+item-page fields are merged into the row. Item-page fields can be a selector, a labelled table
+row (`th:-soup-contains("UPC") + td`), embedded structured data (`jsonld:offers.price`) or a
+meta tag (`meta:description`).
+
+After the run, the **checks** are evaluated: at least `min_records` rows, and each `required`
+field filled in at least 90% of rows. `scrapewizard run` exits with an error code when a check
+fails, so a scheduler can alert.
+
+---
+
+## 7. Memory, changes and repair (`state.py`, `heal.py`)
+
+Every run saves a small state file, `.scrapewizard/<name>.state.json`: the rows, keyed by the
+field that best tells them apart (a link if it is unique, otherwise a well-filled text field),
+and how full each field was. The next run compares against it and reports "12 new, 3 changed,
+0 removed".
+
+The same file is what makes repair safe. When a recipe stops matching:
+
+1. `what_broke` decides whether the run looks broken: no rows at all, a required field
+   mostly empty, or a field that used to be nearly always filled and now mostly is not.
+2. The page is analysed again from scratch, exactly as when the recipe was first built.
+3. Each new field is matched to an old one **by its values**: if the new `span.cost` holds the
+   prices the old `p.price_color` held last time, it is the price.
+4. The repair is accepted only if known rows are found again (at least two, and at least a
+   fifth of the smaller set). Otherwise it is refused, nothing is saved and the user is told.
+
+A scraper has something a test tool lacks: yesterday's data says whether today's repair is
+right. Repairs are recorded in the recipe's `history`. Item-page fields are not repaired yet.
+A `data:` recipe is repaired the same way: if the site renames the key the list sits under,
+the list is found again in the page's data and matched by its values.
+
+---
+
+## 8. Optional AI (`ai.py`)
+
+AI is never needed and is used at most once, while building.
+
+- `--ai` asks a model for better column names, and for a second attempt if no list was found.
+- `--ask "job titles and salaries"` lets the user say what they want in words.
+
+In both cases the page is first cut down (scripts, styling, comments, hidden elements and most
+attributes removed, long text shortened, the whole thing capped in length), the prompt tells
+the model the page content is untrusted, and the model must return a **recipe**. That recipe
+is validated and run against the page like any other. One that returns fewer than three rows
+is rejected, and a field that matches nothing is removed, so a made-up selector cannot get
+through. For column names, the model only sees a few sample values per column.
+
+The AI libraries are an optional install (`pip install ".[ai]"`).
+
+---
+
+## 9. The command (`cli/commands/recipe.py`)
+
+`scrapewizard <url>` is `get`; `scrapewizard run <recipe>` is `run`. `cli/main.py` routes a
+first argument that looks like an address to `get`, so there is no sub-command to remember.
+
+The flow in `get` is: fetch, build, show a preview table, ask one question (this page, all
+pages or quit), read the pages, save the data and the recipe in the current folder. Every
+question has a flag (`--yes`, `--all-pages`, `--pages N`), so the same command works in a
+script. Errors are written as what happened, the likely reason and what to try.
+
+---
+
+## 10. Tests
+
+`tests/recipe/` holds the tests for everything above. Each builder test is a small page that
+reproduces a shape that went wrong on a live site: cards inside grid wrappers, a quote with a
+tag list, tables with and without classes, a `dt`/`dd` list, a title row with a details row,
+a list marked `menu`, generated class names, cards in several layouts, a page whose classes
+are all styling, data in a script. No test touches the internet. Tests that need
+JavaScript, "load more", scrolling or sign-in serve a page from the local machine and open it
+in a real browser.
+
+```bash
+python -m pytest tests/ -v --ignore=tests/golden_sites
 ```
 
 ---
 
-## 🛠️ 3. Technical Low-Level Details
+## 11. The older AI builder
 
-### 1. Stealth Probe Pre-Scan & Sign-In Detection
-**The Problem**: Bot defenses (Akamai, PerimeterX) don't activate in headless mode. Amazon hides its defenses until you browse.
+`scrapewizard build --url ...` is the original tool and is still in the repository. It works
+differently: a state machine (`core/orchestrator.py`) scans the page in a browser, asks an LLM
+to describe it (`UnderstandingAgent`), asks an LLM to write a Python scraper (`CodeGenerator`),
+runs it, and asks an LLM to fix it if the data looks wrong (`RepairAgent`). It needs an API key
+or a local model, and produces a standalone script under `~/scrapewizard_projects/`.
 
-**The Solution**:
-- **Stealth Probe**: Pre-Scan uses a brief headed browser (headless=False) with `--disable-blink-features=AutomationControlled` to trigger real bot defenses.
-- **Sign-In Detection**: Scans for login buttons (`a[href*="login"]`, `a[id*="nav-link-accountList"]`), auth prompts ("sign in to continue"), and known auth-heavy platforms (Amazon, LinkedIn).
-- **Hostility Scoring**: Combines bot defense signals + sign-in likelihood. Score >= 40 forces Guided mode.
-- **Automatic Override**: When Amazon is detected (hostility: 85), system automatically forces Guided Access, preventing headless blocking.
+`scrapewizard/engine/` (selector ladders, element fingerprints, healing, a point-and-click
+picker) was written for that builder and is used only by its own tests. The ideas were carried
+into the recipe path in a simpler form: ladders in the recipe, and repair checked against data
+instead of against a fingerprint.
 
-### 2. Behavioral Scanning & Network Monitoring
-Instead of just grabbing the HTML, we "observe" the page and its traffic.
-- **Stability Monitoring**: We wait for the node count to stop changing.
-- **Mutation Tracking**: We measure how much the page "jitters" (high mutation = complex SPA).
-- **Network Analysis**: We intercept Fetch/XHR/GraphQL calls to find backend API endpoints.
-- **Bot Defense Scanner**: Proactively detects hostile signals (Akamai `_abck` cookies, DataDome scripts, perimeterx network calls).
-- **Full Session Persistence (Storage State)**: ScrapeWizard captures the full `storage_state.json` (Cookies + LocalStorage + SessionStorage). This is critical for modern SPAs using JWTs or token-based auth hidden in the browser's storage.
-- **Portability via Absolute Paths**: Generated scripts use `os.path.dirname(os.path.abspath(__file__))` to find their session files and output folders, meaning they run flawlessly from any directory or CI environment.
-
-### 3. DOM Analysis 2.0 (Scoring & Filtering)
-We don't just find all repeating classes. We score them based on "Richness" (how many child fields they have). This ensures we pick the main product list instead of the footer links.
-
-### 4. Scraper Runtime Contract (SRC) & Hardening
-This is the "Execution Protection" layer that ensures AI-generated code is robust and manageable across **Windows, macOS, and Linux**.
-- **Dynamic Waiting**: The AI uses `smart_wait(selector)` which automatically handles hydration delays.
-- **Infrastructure Isolation**: The AI never sees Playwright, storage files, or output logic. It only returns data dicts.
-- **Robust Deduplication (Phase 6)**: Instead of assuming the first column is a unique ID, the runtime hashes the entire row content.
-- **Structural Enforcement**: Repair and CodeGen agents are strictly instructed to preserve the execution block, preventing corrupted scripts during self-healing.
-- **Unified Sink**: Data is automatically written to JSON, CSV, and Excel by the runtime based on user configuration.
-- **OS Agnostic Paths**: All filesystem operations use `pathlib` and absolute path discovery, ensuring scripts run identically on any operating system.
-
-### 5. UX Philosophy: The Firewall
-"SRC owns HOW. Orchestrator owns WHEN. User owns WHAT."
-By re-introducing decision gates, we ensure the user is always in the loop for high-value decisions (format, depth, quality) while the autonomous agents handle the low-value toil (selectors, waiting, I/O).
-
----
-
-## 🚀 4. How to Learn from This
-1.  **Read `orchestrator.py`**: This is the heart of the project. It connects all the pieces.
-3.  **Break it**: Try a very complex site (like Amazon) to see how the **RepairAgent** handles anti-bot measures or complex lazy loading.
-
-### 💡 Unified Guided Access (Earned Headless)
-ScrapeWizard no longer just asks "Do you want to log in?". Instead, it recommends **Automatic (Headless)** for simple sites and **Guided Access** for complex ones (Amazon, LinkedIn). 
-If you choose **Guided Access**, you can search, filter, and login manually. ScrapeWizard captures the *final* state (URL + Storage) and generates a scraper that works from that precise starting point.
-
----
-
-## 🌉 5. The Bridge & Studio (MVP2)
-
-To enable the transition to a visual IDE, we've implemented an architectural bridge.
-
-### 1. Studio Backend (`studio/backend/main.py`)
-A FastAPI server that acts as the orchestrator for the Desktop UI. 
-- **CDP Bridge**: Proxies Chrome DevTools Protocol (CDP) events to the React frontend.
-- **Session Management**: Tracks user recordings and state via `StudioState`.
-- **Validation**: Uses Pydantic models in `studio/shared/validators.py` for strictly typed API requests.
-
-### 2. Bridge Engine (`studio/bridge/engine.js`)
-An injected script that transforms a standard browser page into an interactive picker.
-- **Picker Mode**: Intercepts clicks and hovers to generate CSS selectors.
-- **Box Model Overlay**: Draws real-time highlights over the target site to assist item selection.
-- **Event Binding**: Communicates directly with the backend via `onElementSelected`.
-
-### 3. AET (Abstract Extraction Template)
-The visual alternative to the SRC. Instead of the AI guessing selectors from a DOM snapshot, the **AET compiler** builds extraction logic directly from the human-selected patterns in the Studio IDE.
-
----
-
-> [!TIP]
-> **Prompt Engineering Secret**: Notice how the prompts always end with "Start your response directly with 'import'". This prevents the LLM from writing "Sure! Here is the code..." which would break our Python execution.
+The plan is to retire this path once nothing depends on it; see SCRAPER_PLAN.md §8.

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scrapewizard"
 version = "1.2.0"
-description = "An agentic AI web scraper builder using Playwright and LLMs."
+description = "Point it at a page, get the data. Builds a reusable scraper recipe with no AI key; AI help is optional."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -14,31 +14,37 @@ authors = [
 ]
 dependencies = [
     "typer>=0.9.0",
-    "playwright>=1.40.0",
+    "rich>=13.0.0",
+    "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "lxml>=4.9.0",
+    "pyyaml>=6.0",
+    "playwright>=1.40.0",
+    "python-json-logger>=2.0.0",
+    # Used by the AI-assisted builder's prompts, retries, reports and key storage.
     "inquirerpy>=0.3.4",
-    "openai>=1.0.0",
+    "tenacity>=8.2.0",
     "jinja2>=3.1.0",
-    "rich>=13.0.0",
+    "keyring>=24.0.0",
+    "yaspin>=2.0.0"
+]
+
+[project.optional-dependencies]
+# pip install "scrapewizard[ai]"     -> --ai, --ask and the AI-assisted builder
+ai = ["openai>=1.0.0", "anthropic>=0.39.0"]
+# pip install "scrapewizard[excel]"  -> --format xlsx
+excel = ["pandas>=2.0.0", "openpyxl>=3.1.0"]
+# pip install "scrapewizard[dev]"    -> running the test suite
+dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.12.0",
-    "tenacity>=8.2.0",
-    "prompt_toolkit>=3.0.0",
-    "keyring>=24.0.0",
-    "pandas>=2.0.0",
-    "openpyxl>=3.1.0",
-    "python-json-logger>=2.0.0",
-    "yaspin>=2.0.0",
-    "sqlmodel",
     "fastapi",
     "uvicorn",
-    "python-dotenv",
-    "aiohttp",
-    "pillow",
+    "openai>=1.0.0",
     "anthropic>=0.39.0",
-    "httpx>=0.27.0"
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0"
 ]
 
 [project.scripts]
@@ -46,19 +52,7 @@ scrapewizard = "scrapewizard.cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scrapewizard*", "scrapewizard_runtime*", "studio", "studio.backend", "studio.bridge", "studio.shared"]
+include = ["scrapewizard*", "scrapewizard_runtime*"]
 
 [tool.setuptools.package-data]
-studio = [
-    "frontend/dist/**/*",
-    "frontend/dist/*",
-    "shared/*.json",
-    "recordings/*.jsonl",
-    "bridge/*.js"
-]
-
-[tool.setuptools.exclude-package-data]
-studio = [
-    "frontend/node_modules/**/*",
-    "frontend/node_modules/*"
-]
+scrapewizard = ["engine/*.js", "demo_app/templates/*.html", "report/templates/*", "schemas/*.json"]

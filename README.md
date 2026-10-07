@@ -1,196 +1,263 @@
 # 🧙 ScrapeWizard
 
-**The Local-First, Self-Healing Web Scraper Builder & UI/UX Test Automation Studio**
+**Point it at a page, get the data. No AI key needed.**
 
-ScrapeWizard is a professional, developer-first toolkit for building, executing, and maintaining reliable web automation workflows. By combining high-fidelity browser recording with an offline, multi-tier self-healing engine, ScrapeWizard ensures your scrapers and test suites survive target site markup changes, class renames, and structural mutations without manual script updates.
+```
+$ scrapewizard https://books.toscrape.com
 
-> [!IMPORTANT]
-> **Key Philosophy:** AI is an *optional enhancer* to help you name steps and recover from layout shifts. It is **never** on the runtime hot-path. If target pages haven't mutated, runtime AI cost is **$0.00**, ensuring high performance, zero runtime LLM costs, and 100% deterministic scraper/test execution.
+Looking at books.toscrape.com ...
+Found 20 items. No browser needed.
+
+ title                      │ price
+────────────────────────────┼────────
+ A Light in the Attic       │ £51.77
+ Tipping the Velvet         │ £53.74
+ Soumission                 │ £50.10
+ Sharp Objects              │ £47.82
+ Sapiens: A Brief History … │ £54.23
+  ... 15 more
+  (+3 more columns in the file: availability, url, image)
+
+This list continues on more pages.
+Save?  [Enter] this page   [a] all pages   [q] quit
+>
+
+Saved  books.csv   20 rows, 5 columns
+       books.recipe.yaml   run again with: scrapewizard run books.recipe.yaml
+```
+
+ScrapeWizard finds the repeating data on a page (product cards, table rows, listings), works out
+the fields, and saves two files in the folder you are in: the data, and a small readable
+**recipe** you can run again, edit by hand, or schedule.
+
+> [!NOTE]
+> This repository is scraper-only. The UI/UX testing Studio that briefly lived here is preserved
+> on the `archive/ui-testing-studio` branch and is moving to its own repository.
 
 ---
 
-## 🚀 Two Products, One Unified Engine
+## ⚡ What it does
 
-Built atop a shared core that tracks deep element fingerprints (tag names, semantic attributes, structural relationships, geometry, and navigation history), ScrapeWizard supports two major developer use-cases:
+*   **No setup, no AI key.** The page is analysed locally.
+*   **Plain HTTP first.** A browser is started only when a page needs JavaScript to show its data.
+*   **Data embedded in the page.** Many JavaScript sites ship their list as JSON inside the page
+    (`__NEXT_DATA__`, JSON-LD, `var data = [...]`). That is read directly: no browser, and no
+    selectors to break.
+*   **Typed, named fields.** Prices, numbers, dates, links and images are recognised and named.
+    Each link is named after the text it belongs to (`url`, `author_url`, `comments_url`).
+*   **Names from the page, not from a model.** Where class names say nothing, columns are named
+    from what the page says: `itemprop`, test markers, where a link goes (`.../stargazers`),
+    the words after a number ("12 stars today"), "3 hours ago" (`age`).
+*   **Selectors that last.** Test markers (`data-testid`) are preferred, and class names made up
+    by a build tool (`jeApUG`) are not used.
+*   **Frames.** If the list sits in a frame of the same site, it is read from the frame.
+*   **Tables.** The heading row becomes the column names. Works on tables with no classes at all.
+*   **Records in two parts.** A title row followed by a details row (Hacker News), or a `dt`
+    followed by its `dd` (arXiv), is read as one row.
+*   **All the pages.** Follows "next" links, numbered pages, "load more" buttons and infinite scroll.
+*   **Item pages.** `--follow` opens each item's own page and adds what it holds: labelled rows,
+    embedded structured data, the description.
+*   **Teach by example.** If it picks the wrong list, show it a value you can see on the page:
+    `scrapewizard <url> --like "A Light in the Attic"`.
+*   **Remembers each run.** `scrapewizard run` reports "12 new, 3 changed, 0 removed since last run".
+*   **Repairs itself.** When a site changes and the recipe stops matching, the page is searched
+    again and the repair is checked against the last run's data. If it can't be checked, it stops
+    instead of guessing.
+*   **Checks on every run.** A minimum row count and required fields. `run` exits with an error
+    when they fail, so a scheduler can alert you.
+*   **Signed-in sites.** `--login` lets you sign in once in a browser window and reuses the session.
+*   **Optional AI.** `--ask "job titles and salaries"` or `--ai`, using your own key or a local
+    model. Used once, to write the recipe. Running a recipe never uses AI.
+*   **CSV, JSON or Excel** output (`--format`).
 
-1. **📦 Product A: Scraper Studio:** Build high-performance data pipelines that export target pages to **CSV, Excel (XLSX), or JSON** with zero-click configuration.
-2. **🧪 Product B: UI/UX Test Automation:** Record workflows once to generate standard **Playwright + pytest** suites. Run them headless in CI with automatic checks for **accessibility (a11y), visual regressions (visual diffs), console errors, and network failures**.
+### A recipe
+
+```yaml
+name: books
+url: https://books.toscrape.com
+fetch: http
+collection:
+  container: article.product_pod
+  fields:
+    title: {select: ["h3 > a@title"], type: text}
+    price: {select: ["p.price_color"], type: money}
+    url:   {select: ["div.image_container > a@href", "h3 > a@href"], type: url}
+pagination: {type: next_link, select: "li.next > a", max_pages: 3}
+checks: {min_records: 30, required: [title, price]}
+detail:                       # only with --follow
+  follow: url
+  fields:
+    upc:         {select: ['th:-soup-contains("UPC") + td'], type: text}
+    description: {select: ["#product_description + p"], type: text}
+```
+
+Each field has a list of selectors tried in order. `@attr` reads an attribute instead of the text.
+Item-page fields may also read embedded data (`jsonld:offers.price`) or a meta tag (`meta:description`).
+
+When the list comes from data embedded in the page, the container starts with `data:` and the
+fields are paths instead of selectors:
+
+```yaml
+collection:
+  container: data:props.pageProps.products
+  fields:
+    title: {select: [name], type: text}
+    price: {select: [price.amount], type: number}
+    image: {select: [images.0.url], type: image}
+```
+
+Run memory and any saved sign-in are kept in a `.scrapewizard/` folder beside the recipe. That
+folder ignores itself in git.
+
+### How well it works
+
+Measured on 7 October 2026 against 14 public pages that were **not** used while building the
+tool, with no AI and no `--like` hint. "Right" means it chose the list a person would want and
+every row came out.
+
+| Page | Result |
+|---|---|
+| GitHub trending | Right: 12 repositories |
+| python.org blogs | Right: 14 posts |
+| arXiv recent papers | Right: 50 papers, each read from a `dt` and the `dd` after it |
+| Hacker News jobs | Right: 30 jobs |
+| Lobsters | Right: 25 stories |
+| Project Gutenberg search | Right: 25 books |
+| dev.to | Right: 17 posts |
+| BBC News | Right: 47 headlines, through the site's own test markers |
+| Wikipedia, countries by population | Right: 240 rows, columns named from the headings. Plain HTTP was refused; the browser fallback handled it |
+| Real Python | Right: 18 articles, through the browser fallback |
+| scrapethissite.com frames page | Right: 14 rows, read from the frame |
+| quotes.toscrape.com/tableful | Partly: the rows are found, but the quote and its tags alternate in one column |
+| PyPI search | Nothing: the site answers with a bot check |
+| Stack Overflow questions | Nothing: refused over HTTP and in the browser |
+
+**11 of 14 right, 1 partly, 2 not** (both behind bot protection). Finding the list takes about
+a second or less on each, including the 1.7 MB Wikipedia page.
+
+Column names, on a site whose classes are all styling (GitHub trending):
+
+| Before | Now |
+|---|---|
+| `title, text, text_2, number, number_2, text_3` | `title, description, programming_language, stargazers, forks, stars_today` |
+
+Not every column gets a good name. Where the page says nothing about a value, it is still
+`text` or `number`. Three ways to fix that:
+
+*   rename the keys in the recipe file (it is plain YAML),
+*   pass `--ai` to let a model suggest names once, or
+*   pass `--ask "repository, description, language, stars"` to say what you want.
+
+A JavaScript-drawn page (quotes.toscrape.com/js) that used to need a browser now gives all 100
+quotes over 10 pages with plain HTTP, read from the data embedded in each page.
+
+### Known limits
+
+*   **Bot protection.** Sites that refuse automated browsers (PyPI search, Stack Overflow) are
+    not handled, and this tool does not try to get around them. `--login` is for sites that
+    need an account, not for getting past bot checks.
+*   **Lists loaded from an API after the page opens** are read from the page a browser draws.
+    The API itself is not called directly yet.
+*   **Embedded data** is read only when it is real JSON. Data written as JavaScript code
+    (unquoted keys, Next.js "app router" streams) is not; those pages fall back to the browser.
+*   **Records that alternate in a class-less table** come out as one column.
+*   **One main link per row.** When a site marks some cards' links differently, a few rows can
+    come out without a `url` (4 of 47 on BBC News).
+*   **Self-repair** covers the list and its fields. Item-page fields (`detail`) are not repaired yet.
+*   **Infinite scroll** is detected when more pages are asked for (`--all-pages`, `--pages N`).
+*   **Not verified live:** the AI options were tested with a stand-in model, `--login` with a
+    scripted sign-in, and self-repair by damaging a saved recipe. None of the three has been run
+    against a real AI service, a real account or a real redesign in this repository's tests.
+*   **No site-wide crawler.** It reads one list, its pages and its items.
+
+## 🤖 The AI-assisted builder (older, optional)
+
+`scrapewizard build --url ...` is the original guided builder. It needs an LLM key (OpenAI,
+Anthropic, OpenRouter) or a local Ollama model and writes a standalone Playwright script.
 
 ---
 
-## ⚡ Key Features
-
-*   **🖥️ ScrapeWizard Studio Dashboard:** A premium, local-first web dashboard built with FastAPI and React. Monitor execution queues, visualize run histories step-by-step, review accessibility violations, inspect visual diff crops, and approve or reject healed locators.
-*   **🩺 Multi-Tier Offline Self-Healing (Tiers 0-5):** When page markup changes, our local engine attempts to locate the element automatically using 5 deterministic similarity tiers (attributes, tag structure, geometry, and parent-child hierarchy) with **zero LLM/API calls**.
-*   **📹 High-Fidelity Flow Recorder:** Launches an interactive headed browser context to capture user interactions (clicks, text input, navigation, scroll) along with element fingerprints. Featuring full support for multi-page flows and automatic masking of password inputs.
-*   **🔬 Isolated Sandbox Runner:** Executes flows in clean Playwright contexts, collecting visual screen diffs, console warnings, and network error signals.
-*   **♿ Automated Accessibility (a11y) Audits:** Injects `axe-core` dynamically during runtime sandbox executions to find markup, color contrast, and ARIA violations per step.
-*   **📦 Zero Lock-in Pytest Export:** Export flows directly to standalone Python scripts. The generated files are completely independent of the platform and can run in any standard CI environment.
-*   **🔑 Keyring Security:** Securely stores LLM provider API keys (OpenAI, Anthropic, OpenRouter, and Ollama) using the system's secure keyring.
-
----
-
-## 🛠️ Installation & Setup
+## 🛠️ Installation
 
 ```bash
-# 1. Install ScrapeWizard and its dependencies
-pip install scrapewizard
+# From source
+git clone https://github.com/pras-ops/ScrapeWizard.git
+cd ScrapeWizard
+pip install .
 
-# 2. Install Playwright browser engines
+# Only needed for pages that require JavaScript, --login, "load more" and infinite scroll
 playwright install chromium
 
-# Note: On Linux/CI systems, you may also need:
-playwright install-deps
+# Optional extras
+pip install ".[excel]"   # --format xlsx
+pip install ".[ai]"      # --ai, --ask and the AI-assisted builder
+pip install ".[dev]"     # running the tests
 ```
 
 ---
 
-## 🚦 Getting Started in 60 Seconds
+## 🚦 Quick start
 
-### 1. Record a Workflow
-Launch a headed browser to record user interactions on a page and capture detailed element fingerprints:
 ```bash
-scrapewizard record --url "https://books.toscrape.com" --output login_flow.json
-```
+# Get the data on a page (asks one question: this page or all pages)
+scrapewizard https://books.toscrape.com
 
-### 2. Run Quality Checks & Sandbox
-Execute the recorded workflow headless to check console logs, network errors, accessibility violations, and visual regressions:
-```bash
-scrapewizard test login_flow.json
-```
+# Every page, plus each item's own page, without any question, as JSON
+scrapewizard https://books.toscrape.com --all-pages --follow --yes --format json
 
-### 3. Build a Scraper Project
-Generate a programmatic scraper script from a target URL with guided options:
-```bash
-scrapewizard build --url "https://books.toscrape.com"
-```
+# Run the saved recipe again later: reports what changed, repairs itself if the site changed
+scrapewizard run books.recipe.yaml
 
-### 4. Launch the Web Studio
-Open the local FastAPI web dashboard to manage your tests, runs, and configurations:
-```bash
-scrapewizard start --port 8000
+# A site that needs an account
+scrapewizard https://example.com/orders --login
 ```
 
 ---
 
-## 💻 CLI Commands Reference
+## 💻 CLI reference
 
-### 1. `start` - Launch Web Studio Dashboard
-Boots up the FastAPI backend and opens the React web dashboard in your default browser.
-```bash
-scrapewizard start [--port PORT] [--no-open]
-```
+| Command | What it does |
+|---|---|
+| `scrapewizard <url>` | Look at a page, preview the data, save it with a recipe. Options: `--like VALUE`, `--follow`, `--pages N`, `--all-pages`, `--format csv\|json\|xlsx`, `--out NAME`, `--yes`, `--browser`, `--login`, `--ai`, `--ask TEXT` |
+| `scrapewizard run RECIPE` | Run a saved recipe again: reports changes, repairs itself if the site changed, exits with an error if its checks fail. Options: `--pages N`, `--all-pages`, `--format`, `--out NAME`, `--no-repair` |
+| `scrapewizard doctor` | Check Python, Playwright, config and LLM connectivity |
+| `scrapewizard setup` | Only for the optional AI help: choose the provider and model |
+| `scrapewizard login KEY` | Only for the optional AI help: save an API key in the system keyring |
+| `scrapewizard version` | Print the installed version |
 
-### 2. `record` - Record User Interactions
-Opens a headed browser to capture user events and element fingerprints, saving them to a JSON file.
-```bash
-scrapewizard record --url URL [--output OUTPUT_JSON] [--screenshots SCREENSHOT_DIR]
-```
-
-### 3. `test` - Run Sandbox Quality Checks
-Runs a headless sandbox execution of the recorded flow, collecting quality signals (console, network, a11y, visual diff).
-```bash
-scrapewizard test FLOW_JSON [--artifacts ARTIFACT_DIR] [--headed]
-```
-
-### 4. `build` - Generate Scraper
-Builds a new scraping project from a URL.
-```bash
-# Standard guided scraper builder
-scrapewizard build --url URL
-
-# Expert Mode: Shows debug logs, database states, and raw model logs
-scrapewizard build --url URL --expert
-
-# Interactive Mode: Prompts smart questions about target fields and formats
-scrapewizard build --url URL --interactive
-```
-
-### 5. `setup` - Configure Global Settings
-Interactively configures default LLM providers, active models, active proxies, and settings.
-```bash
-scrapewizard setup [--provider PROVIDER] [--api-key KEY] [--model MODEL] [--use-proxy]
-```
-
-### 6. `login` - Secure Provider Keys
-Saves your LLM provider API keys securely in the system keyring.
-```bash
-scrapewizard login "sk-..."
-```
-
-### 7. `list` - View Local Projects
-Lists all active scraper projects, target URLs, states, and modification times.
-```bash
-scrapewizard list
-```
-
-### 8. `resume` - Continue Scraper Builder
-Resumes an interrupted scraper construction or guided tour session.
-```bash
-scrapewizard resume PROJECT_ID
-```
-
-### 9. `doctor` - Environment Diagnostics
-Checks Python version, configuration files, Playwright installation, projects directory, and LLM connection health.
-```bash
-scrapewizard doctor
-```
-
-### 10. `clean` - Cleanup Temporary Workspace
-Purges cached test runs, build logs, and deleted project files to free up disk space.
-```bash
-scrapewizard clean [--force]
-```
-
-### 11. `version` - Show Version
-Prints the installed version of ScrapeWizard.
-```bash
-scrapewizard version
-```
+The older AI-assisted builder (`build`, `list`, `resume`, `clean`) still works but is no longer
+shown in `--help`.
 
 ---
 
-## ⚙️ The Self-Healing Hierarchy (Tiers 0-6)
+## 🏗️ Where things are stored
 
-When a web element mutates (e.g. classes renamed, layout shifted, attributes altered), the ScrapeWizard engine steps through a deterministic self-healing hierarchy to re-identify the element offline:
-
-1. **Tier 0 (Direct Match):** Evaluates the primary selector.
-2. **Tier 1 (Selector Ladder):** Tries fallback CSS selectors recorded during fingerprinting.
-3. **Tier 2 (Attribute & Text Score):** Computes similarity score of attribute overlap and normalized inner text.
-4. **Tier 3 (Structural Matching):** Evaluates parent/sibling tag relationships and sibling offsets.
-5. **Tier 4 (Geometry & Visuals):** Compares relative viewport coordinates (x/y percentages) and dimensions.
-6. **Tier 5 (History & Navigation):** Checks past successful element resolutions from historical runs.
-7. **Tier 6 (LLM Recovery - Opt-in):** Triggers only if all offline tiers fail. Sends a compact DOM snippet to the LLM to locate the element, verifying the proposed selector by re-running the step.
-
-> [!TIP]
-> To prevent wrong-element matches (false positives), the self-healing system requires a strict scoring margin threshold between the top match and secondary candidates. Heals are only persisted if the full re-run completes successfully.
+* **`scrapewizard <url>` and `run`:** the data file and `<name>.recipe.yaml` are saved in the
+  current folder.
+* **Config (AI builder):** `~/.scrapewizard/` (`config.json`, `proxy.json`)
+* **AI builder projects:** `~/scrapewizard_projects/<PROJECT_ID>/`
+  * `generated_scraper.py`: the scraper
+  * `output/`: extracted data (JSON, CSV, XLSX)
+  * `session.json`: build state
+  * `llm_logs/`: prompts and raw model output, for auditing
 
 ---
 
-## 🏗️ Workspace Directory Structure
+## 🧪 Tests
 
-All global configurations and local scraping/testing projects are stored locally on your machine:
-
-* **Global Configuration:** Saved in `~/.scrapewizard/`
-  * `config.json` — Active LLM provider, default model, and settings.
-  * `proxy.json` — Configured proxies.
-* **Scraper Projects Root:** Saved in `~/scrapewizard_projects/`
-  * Contains individual `<PROJECT_ID>/` directories with:
-    * `session.json` — Project execution state and metadata.
-    * `generated_scraper.py` — The final Python scraper script.
-    * `llm_logs/` — Prompts and raw completion text for auditing.
-    * `output/` — Extracted datasets (JSON, CSV, XLSX).
-* **Test Baselines & Runs:**
-  * `~/.scrapewizard/baselines/` — Baseline screenshots for visual regression tests.
-  * Run artifacts (screenshots, visual diffs, and test report logs) are saved in the configured output directories.
-
----
-
-## 🧪 Running Unit Tests
-Verify the local installation and self-healing efficacy by executing:
 ```bash
-python3 -m pytest tests/ -v --ignore=tests/golden_sites
+pip install -r requirements.txt
+playwright install chromium
+python -m pytest tests/ -v --ignore=tests/golden_sites
 ```
+
+202 tests, all offline: every page they read is served from the test's own machine. Some start
+a real browser, which is why the browser install is needed.
+
+## 📚 More
+
+* [learn.md](learn.md): how it works inside, module by module.
+* [SCRAPER_PLAN.md](SCRAPER_PLAN.md): the research behind it, the plan, and what is done and open.
 
 ---
 

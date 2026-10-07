@@ -1,0 +1,539 @@
+"""The everyday commands: get data from a page, and run a saved recipe again."""
+import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from scrapewizard.recipe.ai import AIUnavailable, propose_recipe, rename_fields
+from scrapewizard.recipe.builder import BuildResult, build_recipe, content_frames
+from scrapewizard.recipe.embedded import DATA_PREFIX
+from scrapewizard.recipe.detail import build_detail_fields
+from scrapewizard.recipe.extract import RunResult, run_recipe
+from scrapewizard.recipe.extract import parse
+from scrapewizard.recipe.fetch import BrowserSession, FetchError, fetch, fetch_http, sign_in
+from scrapewizard.recipe.heal import RepairRefused, repair, what_broke
+from scrapewizard.recipe.model import Recipe, RecipeError, load_recipe, save_recipe
+from scrapewizard.recipe.output import FORMATS, OutputError, check_format, save_records
+from scrapewizard.recipe.state import compare, load_state, save_session, save_state, session_path
+
+console = Console()
+
+PREVIEW_ROWS = 5
+CELL_WIDTH = 26
+ALL_PAGES = 1000  # safety cap for "all pages"
+
+
+def _fail(message: str, hint: Optional[str] = None) -> "typer.Exit":
+    """Print a plain error with an optional next step, and return the exit to raise."""
+    # soft_wrap: a suggested command must stay on one line so it can be copied.
+    console.print(f"[red]{message}[/red]", soft_wrap=True)
+    if hint:
+        console.print(hint, soft_wrap=True)
+    return typer.Exit(code=1)
+
+
+def _normalise_url(url: str) -> str:
+    if "://" not in url:
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise _fail(f"'{url}' is not a web address.", "Example: scrapewizard https://books.toscrape.com")
+    return url
+
+
+def _show_preview(records: List[Dict[str, Any]]) -> None:
+    """Show the first rows. Only as many columns as fit are shown; the rest are named."""
+    columns = list(records[0].keys())
+    fits = max(2, console.width // (CELL_WIDTH + 3))
+    shown, hidden = columns[:fits], columns[fits:]
+
+    table = Table(show_edge=False, header_style="bold")
+    for column in shown:
+        table.add_column(column, overflow="ellipsis", no_wrap=True,
+                         min_width=min(CELL_WIDTH, max(len(column), 8)), max_width=CELL_WIDTH)
+    for record in records[:PREVIEW_ROWS]:
+        table.add_row(*("" if record.get(c) is None else str(record[c]) for c in shown))
+    console.print(table)
+    if len(records) > PREVIEW_ROWS:
+        console.print(f"  ... {len(records) - PREVIEW_ROWS} more")
+    if hidden:
+        console.print(f"  (+{len(hidden)} more columns in the file: {', '.join(hidden)})")
+
+
+def choose_pages(has_more: bool, read: Callable[[str], str] = input) -> Optional[int]:
+    """Ask the one question. Returns pages to read, or None if the user quit."""
+    options = "[Enter] this page   [a] all pages   [q] quit" if has_more else "[Enter] save   [q] quit"
+    try:
+        answer = read(f"Save?  {options}\n> ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer in ("q", "quit", "n", "no"):
+        return None
+    if has_more and answer in ("a", "all"):
+        return ALL_PAGES
+    if has_more and answer.isdigit() and int(answer) > 0:
+        return int(answer)
+    return 1
+
+
+def _ai_recipe(html: str, url: str, want: Optional[str], mode: str) -> Optional[BuildResult]:
+    """Ask the configured AI model for a recipe. A missing key stops with how to set one."""
+    try:
+        return propose_recipe(html, url, want=want, fetch_mode=mode)
+    except AIUnavailable as e:
+        raise _fail(str(e))
+
+
+def _inside_frame(html: str, url: str, outer: Optional[BuildResult], likes: List[str],
+                  name: Optional[str]) -> Optional[BuildResult]:
+    """The list inside the page's own frame, when that holds more than the page around it.
+
+    The recipe is written for the frame's address, so later runs go straight there.
+    """
+    best: Optional[BuildResult] = None
+    for address in content_frames(html, url):
+        try:
+            inner = build_recipe(fetch_http(address), address, likes=likes, name=name, fetch_mode="http")
+        except FetchError:
+            continue
+        if inner is not None and (best is None or len(inner.records) > len(best.records)):
+            best = inner
+    if best is None or (outer is not None and len(best.records) < 2 * len(outer.records)):
+        return None
+    console.print(f"The data is inside a frame. Reading it from {best.recipe.url}")
+    return best
+
+
+def _build(url: str, likes: List[str], name: Optional[str], force_browser: bool,
+           use_ai: bool = False, ask: Optional[str] = None) -> BuildResult:
+    """Fetch the page the cheapest way that works and build a recipe from it.
+
+    Without AI the page is analysed locally. ``ask`` (what the user wants, in
+    words) sends the page to the AI model instead. ``use_ai`` lets the model
+    try only when local analysis finds nothing.
+    """
+    host = urlparse(url).hostname
+    console.print(f"Looking at {host} ...")
+    http_error: Optional[FetchError] = None
+    html: Optional[str] = None
+    menu_only: Optional[BuildResult] = None   # the plain page showed a list, but only in its navigation
+
+    def find(page: str, mode: str) -> Optional[BuildResult]:
+        if ask:
+            return _ai_recipe(page, url, ask, mode)
+        return build_recipe(page, url, likes=likes, name=name, fetch_mode=mode)
+
+    if not force_browser:
+        try:
+            html = fetch_http(url)
+            result = find(html, "http")
+            if not ask:
+                result = _inside_frame(html, url, result, likes, name) or result
+            if result and result.in_menu and not likes:
+                menu_only, result = result, None
+            if result:
+                where = " in the page's embedded data" if result.recipe.container.startswith(DATA_PREFIX) else ""
+                console.print(f"Found {len(result.records)} items with AI help." if ask
+                              else f"Found {len(result.records)} items{where}. No browser needed.")
+                return result
+        except FetchError as e:
+            if not e.browser_may_help:
+                raise _fail(str(e), "Check the address and your connection, then try again.")
+            http_error = e
+        if http_error:
+            console.print(f"{http_error} Trying a browser ...")
+        elif menu_only:
+            console.print("The plain page only shows a menu. Loading it in a browser ...")
+        elif likes:
+            console.print("Those values aren't in the plain page. Loading it in a browser ...")
+        else:
+            console.print("The plain page didn't show a list. Loading it in a browser ...")
+
+    try:
+        with BrowserSession() as session:
+            html = session.open(url)
+            result = find(html, "browser")
+            if result and menu_only and result.in_menu:
+                result = None  # the browser shows nothing more than the plain page did
+            if result and not result.has_more:
+                _detect_scrolling(session, result)
+    except FetchError as e:
+        if menu_only is None:
+            # If plain HTTP was refused too, that message says more about the cause.
+            raise _fail(str(http_error or e))
+        result = None
+    if result:
+        console.print(f"Found {len(result.records)} items (the page needed a browser to load).")
+        return result
+    if menu_only:
+        console.print(f"Found {len(menu_only.records)} items. They look like the page's menu: "
+                      "if that is not what you want, name a value you can see with --like.")
+        return menu_only
+
+    if ask:
+        raise _fail("The AI model could not find that on the page.",
+                    "Try describing it differently, or name a value you can see: --like \"...\"")
+    if use_ai and html and not likes:
+        console.print("Local analysis found no list. Asking the AI model ...")
+        result = _ai_recipe(html, url, None, "browser")
+        if result:
+            console.print(f"Found {len(result.records)} items with AI help.")
+            return result
+        raise _fail("The AI model could not find a repeating list on this page either.")
+    if likes:
+        raise _fail("Couldn't find a list containing those example values.",
+                    "Check the values are visible on the page, exactly as typed.")
+    raise _fail("Couldn't find a repeating list on this page.",
+                'Try:  scrapewizard <url> --like "a value you can see on the page"\n'
+                "  or: scrapewizard <url> --ai   (needs an AI key or a local model)")
+
+
+def _wait_for_enter(page: Any) -> None:
+    try:
+        input("Press Enter here when you are signed in and can see the data ... ")
+    except EOFError:
+        pass
+
+
+def _build_signed_in(url: str, likes: List[str], wait: Callable[[Any], None] = _wait_for_enter,
+                     headless: bool = False) -> "tuple[BuildResult, Dict[str, Any]]":
+    """Let the user sign in in a visible browser, then build from the page they end on."""
+    console.print("This opens a browser window. Sign in as usual and go to the page with the data you want.")
+    try:
+        storage, landed, html = sign_in(url, wait, headless=headless)
+    except FetchError as e:
+        raise _fail(str(e))
+    result = build_recipe(html, landed, likes=likes, fetch_mode="browser")
+    if result is None:
+        raise _fail("Couldn't find a repeating list on the page you ended on.",
+                    "Go to the page that shows the list before pressing Enter, or add --like \"a value on it\".")
+    result.recipe.login = True
+    console.print(f"Found {len(result.records)} items on {urlparse(landed).hostname}{urlparse(landed).path}.")
+    return result, storage
+
+
+def _detect_scrolling(session: BrowserSession, result: BuildResult) -> None:
+    """Scroll once: if more items appear, the list is an infinite scroll."""
+    grown = session.scroll_more()
+    if grown is None:
+        return
+    try:
+        now = len(parse(grown).select(result.recipe.container))
+    except Exception:
+        return
+    if now > len(result.records):
+        result.recipe.pagination = {"type": "scroll", "max_pages": 1}
+
+
+def _look_for_more_in_browser(url: str, likes: List[str], result: BuildResult) -> BuildResult:
+    """More pages were asked for but the plain page shows no way to continue.
+
+    Some lists only reveal their "next" control, or load more on scrolling,
+    once scripts have run. Look again in a browser before settling for one page.
+    """
+    console.print("The plain page shows no next page. Checking in a browser whether it loads more ...")
+    try:
+        with BrowserSession() as session:
+            rendered = build_recipe(session.open(url), url, likes=likes, name=result.recipe.name,
+                                    fetch_mode="browser")
+            if rendered and not rendered.has_more:
+                _detect_scrolling(session, rendered)
+    except FetchError as e:
+        console.print(f"{e} Keeping the one page already read.")
+        return result
+    if rendered and rendered.has_more:
+        return rendered
+    console.print("It doesn't: this is the whole list.")
+    return result
+
+
+def _save(records: List[Dict[str, Any]], recipe: Optional[Recipe], name: str, fmt: str) -> Optional[Path]:
+    """Save the data and, if given, the recipe. Returns the recipe's path."""
+    data_path = Path(f"{name}.{fmt}")
+    try:
+        save_records(records, data_path, fmt)
+    except OutputError as e:
+        raise _fail(str(e))
+    columns = len(records[0]) if records else 0
+    console.print(f"[green]Saved[/green]  {data_path}   {len(records)} rows, {columns} columns", soft_wrap=True)
+    if recipe is not None:
+        recipe_path = save_recipe(recipe, Path(f"{name}.recipe.yaml"))
+        # soft_wrap keeps the command on one line so it can be copied.
+        console.print(f"       {recipe_path}   run again with: scrapewizard run {recipe_path}", soft_wrap=True)
+        return recipe_path
+    return None
+
+
+def _output_name(out: Optional[str], fallback: str) -> str:
+    """The file name without extension: --out wins, and a typed extension is dropped."""
+    if not out:
+        return fallback
+    path = Path(out)
+    return str(path.with_suffix("")) if path.suffix.lstrip(".") in FORMATS else out
+
+
+def _run_pages(recipe: Recipe, pages: Optional[int], storage: Any = None) -> RunResult:
+    """Run a recipe, printing progress. ``pages`` of None means what the recipe says.
+
+    ``storage`` is a saved sign-in (path or dict) for recipes that need one.
+    """
+    limit = pages if pages is not None else int(recipe.pagination.get("max_pages") or 1)
+
+    def page_progress(done: int, rows: int) -> None:
+        console.print(f"  page {done}: {rows} rows so far")
+
+    def item_progress(done: int, total: int) -> None:
+        if done % 10 == 0 or done == total:
+            console.print(f"  item pages: {done} of {total}")
+
+    return run_recipe(recipe, max_pages=pages, on_page=page_progress if limit > 1 else None,
+                      on_item=item_progress,
+                      session_factory=lambda: BrowserSession(storage_state=storage))
+
+
+ITEM_PAGES_SAMPLED = 3
+
+
+def _add_item_pages(recipe: Recipe, records: List[Dict[str, Any]], storage: Any = None) -> None:
+    """Look at a few item pages and add the fields they hold to the recipe."""
+    link = None
+    for f in recipe.fields:
+        values = [str(r[f.name]) for r in records if r.get(f.name)]
+        if f.type == "url" and values and len(set(values)) >= 0.9 * len(records):
+            link = f.name
+            break
+    if link is None:
+        console.print("The items have no link of their own to follow. Continuing with the list only.")
+        return
+
+    sample = [r for r in records if r.get(link)][:ITEM_PAGES_SAMPLED]
+    console.print(f"Opening {len(sample)} item pages to see what they hold ...")
+    pages = []
+    try:
+        with BrowserSession(storage_state=storage) if recipe.fetch == "browser" else _NoSession() as session:
+            for record in sample:
+                address = str(record[link])
+                pages.append(parse(session.open(address) if session else fetch_http(address)))
+    except FetchError as e:
+        console.print(f"{e} Continuing with the list only.")
+        return
+
+    fields = build_detail_fields(pages, sample, [f.name for f in recipe.fields])
+    if not fields:
+        console.print("The item pages hold nothing the list doesn't already have. Continuing with the list only.")
+        return
+    recipe.follow = link
+    recipe.detail_fields = fields
+    names = ", ".join(f.name for f in fields)
+    console.print(f"Each item page adds {len(fields)} fields: {names}", soft_wrap=True)
+
+
+class _NoSession:
+    """Stands in for a browser session when item pages are read over plain HTTP."""
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def get(
+    url: str = typer.Argument(..., help="The page to get data from."),
+    like: Optional[List[str]] = typer.Option(None, "--like", help="A value you can see on the page, to show which list you want. Repeatable."),
+    fmt: str = typer.Option("csv", "--format", "-f", help="csv, json or xlsx."),
+    pages: Optional[int] = typer.Option(None, "--pages", help="How many pages to read."),
+    all_pages: bool = typer.Option(False, "--all-pages", help="Follow the list to its last page."),
+    out: Optional[str] = typer.Option(None, "--out", "-o", help="File name to save as (without extension)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask; save with the defaults."),
+    follow: bool = typer.Option(False, "--follow", help="Also open each item's own page and collect what it holds."),
+    browser: bool = typer.Option(False, "--browser", help="Load the page in a browser even if plain HTTP works."),
+    ai: bool = typer.Option(False, "--ai", help="Let an AI model help: better column names, and a second try if no list is found."),
+    ask: Optional[str] = typer.Option(None, "--ask", help='Say what you want in words and let an AI model find it, e.g. "job titles and salaries".'),
+    login: bool = typer.Option(False, "--login", help="Sign in first, in a browser window. The sign-in is saved for later runs."),
+) -> None:
+    """Look at a page, preview the data on it, and save it with a recipe.
+
+    No AI key is needed. Shorthand: scrapewizard <url>
+
+    --ai and --ask are optional and use the model set up with 'scrapewizard setup'.
+    The model is used once, here, to write the recipe. Running a recipe never uses AI.
+    """
+    try:
+        check_format(fmt)  # before fetching anything: a wrong format should not cost a scrape
+    except OutputError as e:
+        raise _fail(str(e))
+    url = _normalise_url(url)
+    storage: Optional[Dict[str, Any]] = None
+    if login:
+        result, storage = _build_signed_in(url, list(like or []))
+    else:
+        result = _build(url, list(like or []), None, browser, use_ai=ai or bool(ask), ask=ask)
+    recipe = result.recipe
+    if ai and not ask:
+        try:
+            renames = rename_fields(recipe, result.records)
+        except AIUnavailable as e:
+            console.print(f"{e} Keeping the names found locally.")
+        else:
+            for old, new in renames.items():
+                console.print(f"AI renamed a column: {old} -> {new}")
+
+    console.print()
+    _show_preview(result.records)
+    console.print()
+    if follow:
+        _add_item_pages(recipe, result.records, storage)
+        console.print()
+
+    has_more = result.has_more
+    in_place = recipe.pagination.get("type") in ("load_more", "scroll")
+    if has_more:
+        console.print("This list loads more as you go." if in_place else "This list continues on more pages.")
+
+    if all_pages:
+        wanted = ALL_PAGES
+    elif pages is not None:
+        wanted = max(1, pages)
+    elif yes or not sys.stdin.isatty():
+        wanted = 1
+    else:
+        wanted = choose_pages(has_more)
+        if wanted is None:
+            console.print("Nothing saved.")
+            raise typer.Exit(code=0)
+
+    if wanted > 1 and not has_more and recipe.fetch == "http":
+        result = _look_for_more_in_browser(url, list(like or []), result)
+        recipe = result.recipe
+        has_more = result.has_more
+        in_place = recipe.pagination.get("type") in ("load_more", "scroll")
+
+    records = result.records
+    more_pages = wanted > 1 and has_more
+    if more_pages or recipe.follow:
+        if more_pages and in_place and recipe.fetch != "browser":
+            console.print("Following it needs a browser. Starting one ...")
+            recipe.fetch = "browser"
+        try:
+            records = _run_pages(recipe, wanted if more_pages else 1, storage).records
+        except FetchError as e:
+            raise _fail(str(e))
+        if more_pages:
+            recipe.pagination["max_pages"] = wanted
+            recipe.checks["min_records"] = max(1, len(records) // 2)
+
+    console.print()
+    name = _output_name(out, recipe.name)
+    recipe.name = Path(name).name  # the recipe carries the name its files were saved under
+    recipe_path = _save(records, recipe, name, fmt)
+    save_state(recipe_path, recipe, records, wanted if has_more else 1)
+    if storage is not None:
+        saved = save_session(recipe_path, storage)
+        console.print(f"       Your sign-in is saved in {saved}. Don't share that file.", soft_wrap=True)
+
+
+def _page_for_repair(recipe: Recipe, storage: Any) -> str:
+    """The recipe's first page as it looks now, fetched the way the recipe fetches it."""
+    if storage is not None:
+        with BrowserSession(storage_state=storage) as session:
+            return session.open(recipe.url)
+    return fetch(recipe.url, recipe.fetch)
+
+
+def _recipe_stem(recipe_path: str) -> str:
+    """shop.recipe.yaml -> shop: running a recipe saves data beside it under the same name."""
+    name = Path(recipe_path).name
+    for ending in (".recipe.yaml", ".recipe.yml", ".yaml", ".yml"):
+        if name.endswith(ending):
+            return name[: -len(ending)]
+    return Path(name).stem
+
+
+def run(
+    recipe_path: str = typer.Argument(..., help="A .recipe.yaml file saved earlier."),
+    fmt: str = typer.Option("csv", "--format", "-f", help="csv, json or xlsx."),
+    pages: Optional[int] = typer.Option(None, "--pages", help="Pages to read (default: what the recipe says)."),
+    all_pages: bool = typer.Option(False, "--all-pages", help="Follow the list to its last page."),
+    out: Optional[str] = typer.Option(None, "--out", "-o", help="File name to save as (without extension)."),
+    no_repair: bool = typer.Option(False, "--no-repair", help="Don't try to repair the recipe if the site changed."),
+) -> None:
+    """Run a saved recipe again. Exits with an error if its checks fail.
+
+    If the site changed and the recipe stops matching, it is repaired and the
+    repair is checked against the data from the last run.
+    """
+    try:
+        check_format(fmt)  # before fetching anything: a wrong format should not cost a scrape
+    except OutputError as e:
+        raise _fail(str(e))
+    try:
+        recipe = load_recipe(recipe_path)
+    except RecipeError as e:
+        raise _fail(str(e))
+
+    state = load_state(recipe_path)
+    limit = ALL_PAGES if all_pages else pages
+    page_limit = limit or int(recipe.pagination.get("max_pages") or 1)
+
+    storage: Optional[Path] = None
+    sign_in_hint = f"Sign in again with: scrapewizard {recipe.url} --login --out {_recipe_stem(recipe_path)}"
+    if recipe.login:
+        storage = session_path(recipe_path)
+        if not storage.exists():
+            raise _fail("This recipe needs a sign-in, and none is saved beside it.", sign_in_hint)
+
+    def read() -> RunResult:
+        try:
+            return _run_pages(recipe, limit, storage)
+        except (FetchError, RecipeError) as e:
+            raise _fail(str(e))
+
+    result = read()
+    problem = what_broke(result.records, recipe, state)
+    if problem and recipe.login and not result.records:
+        # A signed-out visitor usually lands on a sign-in page, which has no list to repair against.
+        raise _fail("No records were found. The saved sign-in has probably expired.", sign_in_hint)
+    if problem and not no_repair:
+        console.print(problem)
+        try:
+            fix = repair(recipe, _page_for_repair(recipe, storage), recipe.url, state)
+        except FetchError as e:
+            raise _fail(str(e))
+        except RepairRefused as e:
+            raise _fail(f"It could not be repaired safely: {e}.",
+                        f"Nothing was saved. Build a fresh recipe with: scrapewizard {recipe.url}")
+        for change in fix.changes:
+            console.print(f"Repaired: {change}", soft_wrap=True)
+        if fix.verified:
+            console.print(f"Checked:  {len(fix.records)} rows on the first page, "
+                          f"{fix.matched} of them known from the last run.")
+        else:
+            console.print("Checked:  the fields match by name and type. "
+                          "No remembered items were on the page to compare with.")
+        recipe = fix.recipe
+        save_recipe(recipe, recipe_path)
+        console.print("Recipe updated.")
+        result = read()
+        problem = what_broke(result.records, recipe, state)
+
+    page_word = "page" if result.pages == 1 else "pages"
+    changes = compare(state, result.records, page_limit)
+    summary = f"{recipe.name}   {len(result.records)} rows from {result.pages} {page_word}"
+    console.print(f"{summary}   {changes}" if changes else summary, soft_wrap=True)
+    if not result.records:
+        raise _fail("No records were found, so nothing was saved.",
+                    "The site may have changed. Build a fresh recipe with: scrapewizard " + recipe.url)
+
+    _save(result.records, None, _output_name(out, _recipe_stem(recipe_path)), fmt)
+    if result.failures or problem:
+        for failure in result.failures or [problem]:
+            console.print(f"[red]Check failed:[/red] {failure}")
+        raise typer.Exit(code=1)
+    # Only a run that passed its checks becomes the memory the next run is compared with.
+    save_state(recipe_path, recipe, result.records, page_limit)
+    console.print("       all checks passed")

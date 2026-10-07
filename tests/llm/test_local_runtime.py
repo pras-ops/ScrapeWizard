@@ -4,7 +4,7 @@ import httpx
 from scrapewizard.llm.local_runtime import LocalRuntime, DaemonStatus, ProbeResult
 
 class TestLocalRuntime:
-    @patch('os.sysconf')
+    @patch('os.sysconf', create=True)
     @patch('subprocess.run')
     def test_detect_hardware_balanced(self, mock_run, mock_sysconf):
         # Mock 12 GB RAM on Unix
