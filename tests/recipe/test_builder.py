@@ -54,7 +54,9 @@ def test_fields_are_named_typed_and_free_of_noise():
     fields = {f.name: f for f in result.recipe.fields}
 
     # Readable columns first; links and image addresses last.
-    assert list(fields) == ["title", "price", "url", "image"]
+    # "In stock" repeats on every card but is data; "Add to basket" is a button and is not.
+    assert list(fields) == ["title", "price", "availability", "url", "image"]
+    assert result.records[0]["availability"] == "In stock"
     assert fields["price"].type == "money"
     assert fields["url"].type == "url"
     assert fields["image"].type == "image"
@@ -174,6 +176,27 @@ def test_example_values_choose_between_lists():
 
 def test_example_value_not_on_the_page_gives_nothing():
     assert build_recipe(two_lists_page(), "https://x.test/", likes=["not on this page"]) is None
+
+
+def test_state_classes_get_a_simpler_fallback_selector():
+    """An out-of-stock item has no 'instock' class: the ladder must still find its status."""
+    cards = "".join(
+        f'<div class="item"><h3>Thing number {i}</h3><p class="instock availability">In stock</p>'
+        f'<span class="cost">${i}.00</span></div>'
+        for i in range(1, 7)
+    )
+    result = build_recipe(f"<html><body><main>{cards}</main></body></html>", "https://x.test/")
+    availability = next(f for f in result.recipe.fields if f.name == "availability")
+    # Most specific first, then the descriptive class alone, then the state class as a last resort.
+    assert availability.select == ["p.instock.availability", "p.availability", "p.instock"]
+
+    from scrapewizard.recipe.extract import extract_records, parse
+    changed = cards.replace('<p class="instock availability">In stock</p>',
+                            '<p class="outofstock availability">Sold out</p>', 1)
+    records = extract_records(parse(f"<html><body><main>{changed}</main></body></html>"),
+                              result.recipe, "https://x.test/")
+    assert records[0]["availability"] == "Sold out"
+    assert records[1]["availability"] == "In stock"
 
 
 def test_page_without_a_list_gives_nothing():

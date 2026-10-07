@@ -34,6 +34,10 @@ MIN_COVERAGE = 0.5     # a field must appear in at least half the sampled items
 MAX_FIELDS = 12
 MAX_TEXT_LENGTH = 500
 MAX_CANDIDATES = 200
+# A value repeated on every item is kept only if it is not one of these controls ...
+CONTROL_TAGS = {"a", "button", "label", "input", "select", "summary"}
+# ... and its class says what it is, rather than being one of these generic words.
+GENERIC_CLASS_NAMES = {"label", "caption", "prefix", "suffix", "icon", "btn", "button", "link", "heading", "header", "text"}
 MAX_ITEM_ELEMENTS = 300  # a block with more elements than this is a page section, not a record
 MAX_VALUE_NODES = 80
 
@@ -51,6 +55,7 @@ class _FieldDraft:
     values: Dict[int, str]             # item index -> value
     position: int                      # order of first appearance in an item
     attr: Optional[str]
+    tag: str = ""                      # tag of the element the value was read from
     type: str = "text"
     name: str = ""
 
@@ -241,7 +246,8 @@ def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
             draft = drafts.get(key)
             if draft is None:
                 spec = f"{selector}@{attr}" if attr else selector
-                draft = drafts[key] = _FieldDraft(selectors=[spec], values={}, position=position, attr=attr)
+                draft = drafts[key] = _FieldDraft(selectors=[spec], values={}, position=position,
+                                                  attr=attr, tag=el.name)
             draft.values.setdefault(index, value)
 
     kept: List[_FieldDraft] = []
@@ -249,7 +255,7 @@ def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
         if len(draft.values) < MIN_COVERAGE * len(sample):
             continue
         distinct = set(draft.values.values())
-        if len(distinct) == 1 and len(sample) >= MIN_ITEMS:
+        if len(distinct) == 1 and len(sample) >= MIN_ITEMS and not _is_named_status(draft):
             continue  # the same on every item: a label or button, not data
         duplicate = next((k for k in kept if k.values == draft.values), None)
         if duplicate is not None:
@@ -260,6 +266,8 @@ def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
     kept = [d for d in kept if not _is_shortened_copy(d, kept)]
     kept = _drop_sublists(kept, len(sample))
     kept = [d for d in kept if not _only_adds_boilerplate(d, kept)]
+    for draft in kept:
+        _add_single_class_fallbacks(draft, sample)
 
     for draft in kept:
         if draft.attr == "href":
@@ -271,6 +279,51 @@ def _discover_fields(items: List[Tag]) -> List[_FieldDraft]:
         else:
             draft.type = infer_type(list(draft.values.values()))
     return kept[:MAX_FIELDS]
+
+
+def _add_single_class_fallbacks(draft: _FieldDraft, sample: List[Tag]) -> None:
+    """Extend the ladder of a multi-class selector with its single-class forms.
+
+    ``p.instock.availability`` stops matching an item that is out of stock.
+    ``p.availability`` still finds it, so it is added as a fallback, provided
+    it picks the same element on every sampled item.
+    """
+    primary, _, attr = draft.selectors[0].partition("@")
+    head, _, last = primary.rpartition(" ")
+    tag, *classes = last.split(".")
+    if len(classes) < 2 or ":" in last:
+        return
+    for cls in reversed(classes):  # the last class is usually the most specific name
+        variant = f"{head} {tag}.{cls}".strip()
+        agrees = 0
+        for item in sample:
+            try:
+                wanted = item.select_one(primary)
+                if wanted is not None and _same_elements(item.select(variant), [wanted]):
+                    agrees += 1
+                elif wanted is not None:
+                    agrees = -1
+                    break
+            except Exception:
+                agrees = -1
+                break
+        spec = f"{variant}@{attr}" if attr else variant
+        if agrees >= MIN_ITEMS and spec not in draft.selectors:
+            draft.selectors.append(spec)
+
+
+def _is_named_status(draft: _FieldDraft) -> bool:
+    """True for a repeated value that is still data, such as "In stock" in ``p.availability``.
+
+    Buttons, links and labels ("Add to basket", "Price:") repeat too, and are not data.
+    """
+    if draft.attr is not None or draft.tag in CONTROL_TAGS:
+        return False
+    value = next(iter(draft.values.values()))
+    if value.endswith(":"):
+        return False
+    name = _class_based_name(draft.selectors[0])
+    return name is not None and name not in GENERIC_CLASS_NAMES
 
 
 def _is_shortened_copy(draft: _FieldDraft, others: List[_FieldDraft]) -> bool:
